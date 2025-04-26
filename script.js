@@ -1,17 +1,20 @@
 /**
- * 
+ *
  * Gridfinity Generator for Onshape
  * ================================
- * 
+ *
  * Gridfinity is an original idea developed by Zach Freedman
  * <https://www.youtube.com/@ZackFreedman>
- * 
- * Adaptation to Onshape (this project) done by Jose Galarza
+ *
+ * Adaptation to Onshape (this project) done by Jose Galarza (@igalarzab)
  * <https://github.com/igalarzab/gridfinity-onshape/>
- * 
+ *
+ * Specifications coming from @Stu142
+ * <https://github.com/Stu142/Gridfinity-Documentation>
+ *
  * This work is licensed under Creative Commons Attribution-ShareAlike 4.0
  * <https://creativecommons.org/licenses/by-sa/4.0/>
- * 
+ *
  */
 
 FeatureScript 2625;
@@ -21,37 +24,39 @@ import(path: 'onshape/std/geometry.fs', version: '2625.0');
 
 
 /**
- * 
- * Global Variables.
- * 
- * Changing any of these will make your part to be not-Gridfinity compliant
+ *
+ * Dimensions.
+ *
+ * You can change any of these dimensions to modify your bin, but doing so will make
+ * your part to be not-Gridfinity compliant
  *
  */
 
 const Dims = {
     unitSize: 42 * millimeter,
     unitHeight: 7 * millimeter,
-    unitClearance: 0.25 * millimeter,
-    
-    bottomSize: 35.6 * millimeter,
-    bottomClearance: 0.00 * millimeter,
-    bottomFillet: 0.8 * millimeter,
-    bottomHoleClearance: 4.8 * millimeter,
-    
-    bottomMagnetRadius: 3.25 * millimeter,
-    bottomMagnetDepth: 2.4 * millimeter,
-        
+    unitSeparator: 0.25 * millimeter,
+
+    baseFillet: 0.8 * millimeter,
+    baseHoleClearance: 4.8 * millimeter,
+    baseDraftAngle: 45 * degree,
     baseLayer1Height: 0.8 * millimeter,
     baseLayer2Height: 1.8 * millimeter,
     baseLayer3Height: 2.15 * millimeter,
     baseLayer4Height: 2.25 * millimeter,
-    baseDraftAngle: 45 * degree,
-    
+
     bodyFillet: 3.75 * millimeter,
-    
+    bodyWallThickness: 1.2 * millimeter,
+
     topHeight: 4.4 * millimeter,
 };
 
+
+/**
+ *
+ * Global Variables.
+ *
+ */
 
 const Planes = {
     top: qCreatedBy(makeId('Top'), EntityType.FACE),
@@ -60,12 +65,22 @@ const Planes = {
 };
 
 
+enum FaceType {
+    TOP, BOTTOM
+}
+
+
+// Ranges -> (min, default, max)
+const MAGNETS_RADIUS_RANGE = [0.5, 3.25, 4.25];
+const MAGNETS_DEPTH_RANGE = [0.5, 2.4, 4];
+
+
 /**
- * 
+ *
  * Feature Definition
  *
  */
- 
+
 annotation { 'Feature Type Name' : 'Gridfinity Bin', 'Feature Type Description' : 'Create a gridfinity bin' }
 export const gridfinityBin = defineFeature(function(context is Context, id is Id, definition is map)
     precondition
@@ -98,13 +113,32 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
                 definition.fingerSlide is boolean;
             }
         }
+        
+        if (definition.magnets) {
+            annotation { 'Group Name' : 'Magnets Config', 'Collapsed By Default' : true }
+            {
+                annotation { 'Name' : 'Radius' } // FIXME: This should be coming from Dims
+                isLength(definition.baseMagnetRadius, { (millimeter): MAGNETS_RADIUS_RANGE } as LengthBoundSpec);
+                
+                annotation { 'Name' : 'Depth' } // FIXME: This should be coming from Dims
+                isLength(definition.baseMagnetDepth, { (millimeter): MAGNETS_DEPTH_RANGE } as LengthBoundSpec);
+            }
+        }
 
     }
     {
+        // 1. Create the 3 parts
         const base = baseCreate(context, definition, id + 'Base');
         const body = bodyCreate(context, definition, id + 'Body', base);
-        
-        // Rename the part
+        const top = topCreate(context, definition, id + 'Top', body);
+
+        // 2. Merge everything in one part
+        mergeParts(context, id + 'Bin', [base.id, body.id, top.id]);
+
+        // 3. Center resulting part
+        centerPart(context, id + 'Center', base.id);
+
+        // 4. Rename the part
         setProperty(context, {
             'entities' : qCreatedBy(base.id, EntityType.BODY),
             'propertyType' : PropertyType.NAME,
@@ -115,20 +149,20 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
 
 
 /**
- * 
+ *
  * Functions to create the base of the bin
  *
  */
- 
+
 function baseCreate(context is Context, definition is map, id is Id) {
     const baseSketch = baseSketch(context, definition, id + 'BaseSketch');
 
     const layer1Extrude = wallExtrude(context, id + 'Layer1Extrude', baseSketch.region, {
         depth: Dims.baseLayer1Height,
-        filletRadius: Dims.bottomFillet,
+        filletRadius: Dims.baseFillet,
         draftAngle: Dims.baseDraftAngle,
     });
-    
+
     const layer2Extrude = wallExtrude(context, id + 'Layer2Extrude', layer1Extrude.topFace, {
         depth: Dims.baseLayer2Height,
     });
@@ -137,31 +171,31 @@ function baseCreate(context is Context, definition is map, id is Id) {
         depth: Dims.baseLayer3Height,
         draftAngle: Dims.baseDraftAngle,
     });
-    
+
     // Merge the three layers of the base into a single part
     const basePart = mergeParts(context, id + 'BasePart', [
         layer1Extrude.id,
         layer2Extrude.id,
         layer3Extrude.id,
     ]);
-    
+
     // Create the magnets if needed
     if (definition.magnets) {
-        const baseHolesSketch = baseHolesSketch(context, id + 'Magnets', definition);
-        
-        const magnets = wallExtrude(context, id + 'MagnetsExtrude', baseHolesSketch.region, {
-            depth: Dims.bottomMagnetDepth,
+        const holesSketch = baseHolesSketch(context, id + 'Magnets', definition, basePart.id);
+
+        const magnets = wallExtrude(context, id + 'MagnetsExtrude', holesSketch.region, {
+            depth: definition.baseMagnetDepth,
         });
-        
+
         substractParts(context, id + 'MagnetsHole', basePart.id, [magnets.id]);
-        removeBodies(context, id + 'DeleteMagnetsSketch', [baseHolesSketch.id]);
+        removeBodies(context, id + 'DeleteMagnetsSketch', [holesSketch.id]);
     }
-    
+
     // Replicate the base for rows * columns
     var linearPatternId = undefined;
     if (definition.rows > 1 || definition.columns > 1) {
         linearPatternId = id + 'ReplicateBases';
-        
+
         linearPattern(context, linearPatternId, {
             'patternType': PatternType.PART,
             'entities': qCreatedBy(basePart.id, EntityType.BODY),
@@ -175,21 +209,21 @@ function baseCreate(context is Context, definition is map, id is Id) {
             'instanceCountTwo': definition.columns,
         });
     }
-    
+
     // Layer 4 is common to all the bases, that's why we do it after the linearPattern
     // After this common layer is created, we can merge all the bases in one
     const layer4Sketch = baseLayer4Sketch(
-        context, 
-        definition, 
-        id + 'Layer4Sketch', 
+        context,
+        definition,
+        id + 'Layer4Sketch',
         layer3Extrude.topFace
     );
-    
+
     const layer4Extrude = wallExtrude(context, id + 'Layer4Extrude', layer4Sketch.region, {
         depth: Dims.baseLayer4Height,
         filletRadius: Dims.bodyFillet,
     });
-    
+
     // Merge all the bases into a single part
     const allBases = mergeParts(context, id + 'AllBases', [
         linearPatternId,
@@ -199,21 +233,19 @@ function baseCreate(context is Context, definition is map, id is Id) {
 
     // Remove sketches, they are not needed anymore
     removeBodies(context, id + 'DeleteBaseSketches', [baseSketch.id, layer4Sketch.id]);
-    
+
     return { 'id': allBases.id, 'topFace': layer4Extrude.topFace };
 }
 
 
 function baseSketch(context is Context, definition is map, id is Id) {
     const sketchId = id + 'Sketch';
-    
+
     const sketch = newSketch(context, sketchId, {
         'sketchPlane' : Planes.top,
     });
-    
-    const bottomSize = Dims.bottomSize - Dims.bottomClearance;
 
-    // FIXME
+    const bottomSize = baseCalculateBottomSize();
     const translateX = (bottomSize / 2);
     const translateY = (bottomSize / 2);
 
@@ -221,59 +253,56 @@ function baseSketch(context is Context, definition is map, id is Id) {
         'firstCorner': vector(-translateX, -translateY),
         'secondCorner': vector(bottomSize - translateX, bottomSize - translateY)
     });
-    
+
     skSolve(sketch);
-    
+
     return { 'id': sketchId, 'sketch': sketch, 'region': qSketchRegion(id, false) };
 }
 
 
-function baseHolesSketch(context is Context, id is Id, definition is map) {
+function baseHolesSketch(context is Context, id is Id, definition is map, partId is Id) {
     const sketchId = id + 'Sketch';
-    
+
     const sketch = newSketch(context, sketchId, {
-        'sketchPlane' : Planes.top,
+        'sketchPlane' : findFace(context, partId, FaceType.BOTTOM),
     });
-    
-    const x = (Dims.bottomSize / 2) - Dims.bottomHoleClearance;
-    const y = -(Dims.bottomSize / 2) + Dims.bottomHoleClearance;
-    
-    skCircle(sketch, 'bottomRight', { 'center' : vector(x, x), 'radius' : Dims.bottomMagnetRadius });
-    skCircle(sketch, 'topRight', { 'center' : vector(x, y), 'radius' : Dims.bottomMagnetRadius });
-    skCircle(sketch, 'bottomLeft', { 'center' : vector(y, x), 'radius' : Dims.bottomMagnetRadius });
-    skCircle(sketch, 'topLeft', { 'center' : vector(y, y), 'radius' : Dims.bottomMagnetRadius });
-    
+
+    const bottomSize = baseCalculateBottomSize();
+    const x = (bottomSize / 2) - Dims.baseHoleClearance;
+    const y = -(bottomSize / 2) + Dims.baseHoleClearance;
+
+    skCircle(sketch, 'bottomRight', { 'center' : vector(x, x), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'topRight', { 'center' : vector(x, y), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'bottomLeft', { 'center' : vector(y, x), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'topLeft', { 'center' : vector(y, y), 'radius' : definition.baseMagnetRadius });
+
     skSolve(sketch);
-    
+
     return { 'id': id, 'sketch': sketch, 'region': qSketchRegion(id, false) };
 }
 
 
 function baseLayer4Sketch(context is Context, definition is map, id is Id, topFace is map) {
     const sketchId = id + 'Sketch';
-    
+
     const tangentPlane = evFaceTangentPlane(context, {
         'face': topFace,
         'parameter': vector(0.5, 0.5),
     });
-    
+
     const sketch = newSketchOnPlane(context, sketchId, {
         'sketchPlane' : tangentPlane
     });
-    
-    const totalUnitClearance = Dims.unitClearance * 2;
-    
-    const totalX = (Dims.unitSize * definition.rows) - totalUnitClearance;
-    const totalY = (Dims.unitSize * definition.columns) - totalUnitClearance;
 
-    const bottomSize = Dims.bottomSize - Dims.bottomClearance;
-    
-    // FIXME
+    const totalX = (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
+    const totalY = (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+
+    const bottomSize = baseCalculateBottomSize();
     const translateX = (bottomSize / 2) + Dims.baseLayer1Height + Dims.baseLayer3Height;
     const translateY = (bottomSize / 2) + Dims.baseLayer1Height + Dims.baseLayer3Height;
 
     skRectangle(sketch, 'rectangle', {
-        'firstCorner': vector(- translateX, -translateY),
+        'firstCorner': vector(-translateX, -translateY),
         'secondCorner': vector(totalX - translateX, totalY - translateY)
     });
 
@@ -283,38 +312,88 @@ function baseLayer4Sketch(context is Context, definition is map, id is Id, topFa
 }
 
 
+function baseCalculateBottomSize() {
+    return Dims.unitSize - ((Dims.baseLayer1Height + Dims.baseLayer3Height + Dims.unitSeparator) * 2);
+}
+
 /**
- * 
+ *
  * Functions to create the body of the bin
  *
  */
- 
+
 function bodyCreate(context is Context, definition is map, id is Id, base is map) {
     const bodyExtrude = wallExtrude(context, id + 'BodyExtrude', base.topFace, {
         depth: Dims.unitHeight * (definition.height - 1),
     });
-    
-    const topExtrude = wallExtrude(context, id + 'TopExtrude', bodyExtrude.topFace, {
-        depth: Dims.topHeight,
-    });
-    
-    // Merge all the parts together
-    const bin = mergeParts(context, id + 'AllBodies', [
-        base.id,
-        bodyExtrude.id,
-        topExtrude.id,
-    ]);
-    
-    return { 'id': bin.id, 'topFace': topExtrude.topFace };
+
+    return { 'id': bodyExtrude.id, 'topFace': bodyExtrude.topFace };
 }
 
 
 /**
- * 
+ *
+ * Functions to create the top of the bin
+ *
+ */
+
+function topCreate(context is Context, definition is map, id is Id, body is map) {
+    const lidSketch = topLipSketch(context, definition, id, body.topFace);
+    const sweepId = id + 'Sweep';
+
+    opSweep(context, sweepId, {
+        'profiles': lidSketch.region,
+        'path': qLoopEdges(body.topFace),
+    });
+
+    // Remove sketches, they are not needed anymore
+    removeBodies(context, id + 'DeleteTop', [lidSketch.id]);
+
+    return { 'id': sweepId, 'topFace': findFace(context, sweepId, FaceType.TOP) };
+}
+
+
+function topLipSketch(context is Context, definition is map, id is Id, topFace is map) {
+    const sketchId = id + 'Sketch';
+
+    const tangentPlane = evFaceTangentPlane(context, {
+        'face': topFace,
+        'parameter': vector(0.5, 0)
+    });
+
+    const perpendicularPlane = plane(
+        tangentPlane.origin,
+        tangentPlane.x,
+        tangentPlane.normal
+    );
+
+    const sketch = newSketchOnPlane(context, sketchId, {
+        'sketchPlane' : perpendicularPlane
+    });
+
+    // This is the sweep contour for the stacking lip
+    const x = [0, 4.4, 4.4, 3.05, 1.25, 0.75, 0, 0];
+    const y = [0, 0, -0.7, -2.05, -2.05, -2.55, -2.55, 0, 0];
+
+    for (var i = 0; i != size(x)-1; i += 1) {
+        skLineSegment(sketch, 'Line' ~ i, {
+            'start' : vector(x[i], y[i]) * millimeter,
+            'end' : vector(x[i+1], y[i+1]) * millimeter
+        });
+    }
+
+    skSolve(sketch);
+
+    return { 'id': sketchId, 'sketch': sketch, 'region': qSketchRegion(id, false) };
+}
+
+
+/**
+ *
  * Helper functions
  *
  */
- 
+
  function wallExtrude(context is Context, id is Id, face is Query, config is map) {
     const extrudeId = id + 'Extrude';
 
@@ -324,13 +403,13 @@ function bodyCreate(context is Context, definition is map, id is Id, base is map
         'endBound' : BoundingType.BLIND,
         'endDepth' : config.depth
     });
-    
+
     if (config.filletRadius != undefined) {
         const edges = qParallelEdges(
             qCreatedBy(id, EntityType.EDGE),
             evPlane(context, {'face' : Planes.top}).normal
         );
-        
+
         opFillet(context, id + 'Fillet', {
             'entities' : edges,
             'radius' : config.filletRadius
@@ -357,18 +436,18 @@ function bodyCreate(context is Context, definition is map, id is Id, base is map
         });
     }
 
-    return { 'id': extrudeId, 'topFace': findTopFace(context, extrudeId) };
+    return { 'id': extrudeId, 'topFace': findFace(context, extrudeId, FaceType.TOP) };
 }
 
- 
+
 function mergeParts(context is Context, id is Id, partIds is array) {
     var parts = [];
     var firstPartId = undefined;
-    
+
     for (var partId in partIds) {
         if (partId != undefined) {
             parts = append(parts, qCreatedBy(partId, EntityType.BODY));
-            
+
             if (firstPartId == undefined) {
                 firstPartId = partId;
             }
@@ -388,17 +467,17 @@ function mergeParts(context is Context, id is Id, partIds is array) {
 function substractParts(context is Context, id is Id, targetId is Id, partIds is array) {
     var parts = [];
     var firstPartId = undefined;
-    
+
     for (var partId in partIds) {
         if (partId != undefined) {
             parts = append(parts, qCreatedBy(partId, EntityType.BODY));
-            
+
             if (firstPartId == undefined) {
                 firstPartId = partId;
             }
         }
     }
-    
+
     opBoolean(context, id + 'Substract', {
         operationType: BooleanOperationType.SUBTRACTION,
         targets: qCreatedBy(targetId, EntityType.BODY),
@@ -410,20 +489,24 @@ function substractParts(context is Context, id is Id, targetId is Id, partIds is
 }
 
 
-function findTopFace(context is Context, id is Id) {
+function findFace(context is Context, id is Id, face is FaceType) {
     const allFaces = evaluateQuery(context, qCreatedBy(id, EntityType.FACE));
+
+    if (face != FaceType.TOP && face != FaceType.BOTTOM) {
+        throw 'Invalid FaceType';
+    }
 
     for (var f in allFaces) {
         const plane = evFaceTangentPlane(context, { 'face': f, parameter: vector(0.5, 0.5) });
 
-        if (plane.normal == vector(0, 0, 1)) {
+        if (plane.normal == vector(0, 0, face == FaceType.TOP ? 1 : -1)) {
             return f;
         }
     }
-    
+
     debug(context, 'No top face found for ' ~ id);
     debug(context, allFaces);
-    
+
     return undefined;
 }
 
@@ -436,8 +519,24 @@ function removeBodies(context is Context, id is Id, idsToRemove is array) {
             finalIds = append(finalIds, qCreatedBy(idToRemove, EntityType.BODY));
         }
     }
-        
+
     opDeleteBodies(context, id + 'DeleteBodies', {
         entities: qUnion(finalIds)
+    });
+}
+
+
+function centerPart(context is Context, id is Id, partId is Id) {
+    const part = qCreatedBy(partId, EntityType.BODY);
+
+    const boxPart = evBox3d(context, {
+        'topology': qCreatedBy(partId, EntityType.BODY)
+    });
+
+    const center = 0.5 * (boxPart.minCorner + boxPart.maxCorner);
+
+    opTransform(context, id + 'MoveToOrigin', {
+        'bodies': part,
+        'transform': transform(-center)
     });
 }
