@@ -3,13 +3,16 @@
  * Gridfinity Generator for Onshape
  * ================================
  *
+ * Author: Jose Galarza (@igalarzab)
+ * <https://x.com/igalarzab>
+ * 
+ * You can submit bugs and feature requests in:
+ * <https://github.com/igalarzab/gridfinity-onshape/>
+ * 
  * Gridfinity is an original idea developed by Zach Freedman
  * <https://www.youtube.com/@ZackFreedman>
  *
- * Adaptation to Onshape (this project) done by Jose Galarza (@igalarzab)
- * <https://github.com/igalarzab/gridfinity-onshape/>
- *
- * Specifications coming from @Stu142
+ * Gridfinity Specifications thanks to @Stu142
  * <https://github.com/Stu142/Gridfinity-Documentation>
  *
  * This work is licensed under Creative Commons Attribution-ShareAlike 4.0
@@ -65,8 +68,16 @@ const Planes = {
 };
 
 
-enum FaceType {
+export enum FaceType {
     TOP, BOTTOM
+}
+
+export enum TopLipShape {
+    SHARP, ROUNDED
+}
+
+export enum FillType {
+    COMPLETE, UNTIL_LIP
 }
 
 
@@ -85,7 +96,7 @@ annotation { 'Feature Type Name' : 'Gridfinity Bin', 'Feature Type Description' 
 export const gridfinityBin = defineFeature(function(context is Context, id is Id, definition is map)
     precondition
     {
-        annotation { 'Group Name' : 'Bin Size', 'Collapsed By Default' : false }
+        annotation { 'Group Name' : 'General Bin', 'Collapsed By Default' : false }
         {
             annotation { 'Name' : 'Rows', 'UIHint' : [UIHint.REMEMBER_PREVIOUS_VALUE] }
             isInteger(definition.rows, POSITIVE_COUNT_BOUNDS);
@@ -99,51 +110,69 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
 
         annotation { 'Group Name' : 'Bin Properties', 'Collapsed By Default' : false }
         {
-            annotation { 'Name' : 'Fill the bin', 'UIHint' : [UIHint.REMEMBER_PREVIOUS_VALUE] }
+            annotation { 'Name' : 'Fill the bin' }
             definition.filled is boolean;
 
-            annotation { 'Name' : 'Add Magnets', 'Default': true, 'UIHint' : [UIHint.REMEMBER_PREVIOUS_VALUE] }
+            annotation { 'Name' : 'Add Stackable Lip', 'Default': true }
+            definition.stackableLip is boolean;
+
+            annotation { 'Name' : 'Add Magnets', 'Default': true }
             definition.magnets is boolean;
 
             if (!definition.filled) {
-                annotation { 'Name' : 'Add Label', 'Default': true, 'UIHint' : [UIHint.REMEMBER_PREVIOUS_VALUE] }
+                annotation { 'Name' : 'Add Label', 'Default': true }
                 definition.label is boolean;
 
-                annotation { 'Name' : 'Add Finger Slide', 'Default': true, 'UIHint' : [UIHint.REMEMBER_PREVIOUS_VALUE] }
+                annotation { 'Name' : 'Add Finger Slide', 'Default': true }
                 definition.fingerSlide is boolean;
             }
         }
         
+        if (definition.filled) {
+            annotation { 'Group Name' : 'Fill Config', 'Collapsed By Default' : true }
+            {
+                annotation { 'Name' : 'Type', 'Default': FillType.UNTIL_LIP }
+                definition.fillType is FillType;
+            }
+        }
+
         if (definition.magnets) {
             annotation { 'Group Name' : 'Magnets Config', 'Collapsed By Default' : true }
             {
-                annotation { 'Name' : 'Radius' } // FIXME: This should be coming from Dims
+                annotation { 'Name' : 'Radius' }
                 isLength(definition.baseMagnetRadius, { (millimeter): MAGNETS_RADIUS_RANGE } as LengthBoundSpec);
-                
-                annotation { 'Name' : 'Depth' } // FIXME: This should be coming from Dims
+
+                annotation { 'Name' : 'Depth' }
                 isLength(definition.baseMagnetDepth, { (millimeter): MAGNETS_DEPTH_RANGE } as LengthBoundSpec);
+            }
+        }
+
+        if (definition.stackableLip) {
+            annotation { 'Group Name' : 'Stackable Lip Config', 'Collapsed By Default' : true }
+            {
+                annotation { 'Name' : 'Shape', 'Default': TopLipShape.SHARP }
+                definition.lipShape is TopLipShape;
             }
         }
 
     }
     {
-        // 1. Create the 3 parts
+        // Create the 3 parts
         const base = baseCreate(context, definition, id + 'Base');
         const body = bodyCreate(context, definition, id + 'Body', base);
         const top = topCreate(context, definition, id + 'Top', body);
 
-        // 2. Merge everything in one part
+        // Merge everything in one part
         mergeParts(context, id + 'Bin', [base.id, body.id, top.id]);
 
-        // 3. Center resulting part
+        // Shell the bin
+        shellCreate(context, definition, id + 'BodyShell', base, body);
+
+        // Center in (0, 0, 0) the resulting part
         centerPart(context, id + 'Center', base.id);
 
-        // 4. Rename the part
-        setProperty(context, {
-            'entities' : qCreatedBy(base.id, EntityType.BODY),
-            'propertyType' : PropertyType.NAME,
-            'value' : 'Gridfinity Bin ' ~ definition.rows ~ 'x' ~ definition.columns
-        });
+        // Rename the part
+        renamePart(context, base.id, 'Gridfinity Bin ' ~ definition.rows ~ 'x' ~ definition.columns);
     }
 );
 
@@ -157,6 +186,7 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
 function baseCreate(context is Context, definition is map, id is Id) {
     const baseSketch = baseSketch(context, definition, id + 'BaseSketch');
 
+    // Create the 3 layers of the base
     const layer1Extrude = wallExtrude(context, id + 'Layer1Extrude', baseSketch.region, {
         depth: Dims.baseLayer1Height,
         filletRadius: Dims.baseFillet,
@@ -172,16 +202,16 @@ function baseCreate(context is Context, definition is map, id is Id) {
         draftAngle: Dims.baseDraftAngle,
     });
 
-    // Merge the three layers of the base into a single part
+    // Merge the three layers into a single part
     const basePart = mergeParts(context, id + 'BasePart', [
         layer1Extrude.id,
         layer2Extrude.id,
         layer3Extrude.id,
     ]);
 
-    // Create the magnets if needed
+    // Create the magnet holes if needed
     if (definition.magnets) {
-        const holesSketch = baseHolesSketch(context, id + 'Magnets', definition, basePart.id);
+        const holesSketch = baseMagnetHolesSketch(context, id + 'Magnets', definition, basePart);
 
         const magnets = wallExtrude(context, id + 'MagnetsExtrude', holesSketch.region, {
             depth: definition.baseMagnetDepth,
@@ -211,12 +241,11 @@ function baseCreate(context is Context, definition is map, id is Id) {
     }
 
     // Layer 4 is common to all the bases, that's why we do it after the linearPattern
-    // After this common layer is created, we can merge all the bases in one
     const layer4Sketch = baseLayer4Sketch(
         context,
         definition,
         id + 'Layer4Sketch',
-        layer3Extrude.topFace
+        layer3Extrude
     );
 
     const layer4Extrude = wallExtrude(context, id + 'Layer4Extrude', layer4Sketch.region, {
@@ -260,11 +289,11 @@ function baseSketch(context is Context, definition is map, id is Id) {
 }
 
 
-function baseHolesSketch(context is Context, id is Id, definition is map, partId is Id) {
+function baseMagnetHolesSketch(context is Context, id is Id, definition is map, base is map) {
     const sketchId = id + 'Sketch';
 
     const sketch = newSketch(context, sketchId, {
-        'sketchPlane' : findFace(context, partId, FaceType.BOTTOM),
+        'sketchPlane' : findFace(context, base.id, FaceType.BOTTOM),
     });
 
     const bottomSize = baseCalculateBottomSize();
@@ -272,9 +301,9 @@ function baseHolesSketch(context is Context, id is Id, definition is map, partId
     const y = -(bottomSize / 2) + Dims.baseHoleClearance;
 
     skCircle(sketch, 'bottomRight', { 'center' : vector(x, x), 'radius' : definition.baseMagnetRadius });
-    skCircle(sketch, 'topRight', { 'center' : vector(x, y), 'radius' : definition.baseMagnetRadius });
-    skCircle(sketch, 'bottomLeft', { 'center' : vector(y, x), 'radius' : definition.baseMagnetRadius });
-    skCircle(sketch, 'topLeft', { 'center' : vector(y, y), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'topRight',    { 'center' : vector(x, y), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'bottomLeft',  { 'center' : vector(y, x), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'topLeft',     { 'center' : vector(y, y), 'radius' : definition.baseMagnetRadius });
 
     skSolve(sketch);
 
@@ -282,11 +311,11 @@ function baseHolesSketch(context is Context, id is Id, definition is map, partId
 }
 
 
-function baseLayer4Sketch(context is Context, definition is map, id is Id, topFace is map) {
+function baseLayer4Sketch(context is Context, definition is map, id is Id, layer3Extrude is map) {
     const sketchId = id + 'Sketch';
 
     const tangentPlane = evFaceTangentPlane(context, {
-        'face': topFace,
+        'face': layer3Extrude.topFace,
         'parameter': vector(0.5, 0.5),
     });
 
@@ -316,6 +345,7 @@ function baseCalculateBottomSize() {
     return Dims.unitSize - ((Dims.baseLayer1Height + Dims.baseLayer3Height + Dims.unitSeparator) * 2);
 }
 
+
 /**
  *
  * Functions to create the body of the bin
@@ -327,7 +357,38 @@ function bodyCreate(context is Context, definition is map, id is Id, base is map
         depth: Dims.unitHeight * (definition.height - 1),
     });
 
-    return { 'id': bodyExtrude.id, 'topFace': bodyExtrude.topFace };
+    return { 'id': bodyExtrude.id, 'topFace': findFace(context, bodyExtrude.id, FaceType.TOP) };
+}
+
+
+function shellCreate(context is Context, definition is map, id is Id, base is map, body is map) {
+    const extrudeId1 = id + 'BodyShellExtrude1';
+    const extrudeId2 = id + 'BodyShellExtrude2';
+
+    const tangentPlane = evFaceTangentPlane(context, {
+        'face': findFace(context, body.id, FaceType.TOP),
+        'parameter': vector(0.5, 0.5),
+    });
+    
+    opExtrude(context, extrudeId1, {
+        'entities': findFace(context, body.id, FaceType.TOP),
+        'direction': vector(-tangentPlane.normal[0], -tangentPlane.normal[1], -tangentPlane.normal[2]),
+        'endBound': BoundingType.BLIND,
+        'endDepth': Dims.unitHeight * (definition.height - 1),
+        'operationType' : NewBodyOperationType.REMOVE
+    });
+
+    opExtrude(context, extrudeId2, {
+        'entities': findFace(context, body.id, FaceType.TOP),
+        'direction': vector(-tangentPlane.normal[0], -tangentPlane.normal[1], -tangentPlane.normal[2]),
+        'endBound': BoundingType.BLIND,
+        'endDepth': Dims.unitHeight * (definition.height - 1),
+        'operationType' : NewBodyOperationType.REMOVE
+    });
+
+    substractParts(context, id + 'SubstractShell', base.id, [extrudeId1, extrudeId2]);
+
+    return { 'id': body.id, 'topFace': findFace(context, body.id, FaceType.TOP) };
 }
 
 
@@ -338,16 +399,15 @@ function bodyCreate(context is Context, definition is map, id is Id, base is map
  */
 
 function topCreate(context is Context, definition is map, id is Id, body is map) {
-    const lidSketch = topLipSketch(context, definition, id, body.topFace);
     const sweepId = id + 'Sweep';
+    const lipSketch = topLipSketch(context, definition, id + 'Lip', body.topFace);
 
     opSweep(context, sweepId, {
-        'profiles': lidSketch.region,
+        'profiles': lipSketch.region,
         'path': qLoopEdges(body.topFace),
     });
 
-    // Remove sketches, they are not needed anymore
-    removeBodies(context, id + 'DeleteTop', [lidSketch.id]);
+    removeBodies(context, id + 'DeleteLipSketch', [lipSketch.id]);
 
     return { 'id': sweepId, 'topFace': findFace(context, sweepId, FaceType.TOP) };
 }
@@ -370,10 +430,20 @@ function topLipSketch(context is Context, definition is map, id is Id, topFace i
     const sketch = newSketchOnPlane(context, sketchId, {
         'sketchPlane' : perpendicularPlane
     });
+    
+    var x = undefined;
+    var y = undefined;
 
     // This is the sweep contour for the stacking lip
-    const x = [0, 4.4, 4.4, 3.05, 1.25, 0.75, 0, 0];
-    const y = [0, 0, -0.7, -2.05, -2.05, -2.55, -2.55, 0, 0];
+    if (definition.lipShape == TopLipShape.SHARP) {
+        x = [0.0, 4.4, 4.4,  2.5,  0.7,  0.0,  0.0, 0.0];
+        y = [0.0, 0.0, 0.0, -1.9, -1.9, -2.6, -2.6, 0.0];
+    } else if (definition.lipShape == TopLipShape.ROUNDED) {
+        x = [0.0, 4.4,   4.4, 3.05, 1.25, 0.55,  0.0, 0.0];
+        y = [0.0, 0.0, -0.55, -1.9, -1.9, -2.6, -2.6, 0.0];
+    } else {
+        throw 'Invalid TopLipShape value: ' ~ definition.lipShape;
+    }
 
     for (var i = 0; i != size(x)-1; i += 1) {
         skLineSegment(sketch, 'Line' ~ i, {
@@ -493,7 +563,7 @@ function findFace(context is Context, id is Id, face is FaceType) {
     const allFaces = evaluateQuery(context, qCreatedBy(id, EntityType.FACE));
 
     if (face != FaceType.TOP && face != FaceType.BOTTOM) {
-        throw 'Invalid FaceType';
+        throw 'Invalid FaceType value: ' ~ face;
     }
 
     for (var f in allFaces) {
@@ -533,10 +603,20 @@ function centerPart(context is Context, id is Id, partId is Id) {
         'topology': qCreatedBy(partId, EntityType.BODY)
     });
 
-    const center = 0.5 * (boxPart.minCorner + boxPart.maxCorner);
+    var center = 0.5 * (boxPart.minCorner + boxPart.maxCorner);
+    center[2] = 0 * millimeter;
 
     opTransform(context, id + 'MoveToOrigin', {
         'bodies': part,
         'transform': transform(-center)
+    });
+}
+
+
+function renamePart(context is Context, id is Id, name is string) {
+    setProperty(context, {
+        'entities' : qCreatedBy(id, EntityType.BODY),
+        'propertyType' : PropertyType.NAME,
+        'value' : name
     });
 }
