@@ -165,8 +165,8 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
         // Merge everything in one part
         mergeParts(context, id + 'Bin', [base.id, body.id, top.id]);
 
-        // Shell the bin
-        shellCreate(context, definition, id + 'BodyShell', base, body);
+        // TODO: Move this to bodyCreate if we are able to offset the hollow inside
+        hollowFace(context, id + 'HollowBin', base.id, body.id, Dims.unitHeight * (definition.height - 1));
 
         // Center in (0, 0, 0) the resulting part
         centerPart(context, id + 'Center', base.id);
@@ -187,17 +187,17 @@ function baseCreate(context is Context, definition is map, id is Id) {
     const baseSketch = baseSketch(context, definition, id + 'BaseSketch');
 
     // Create the 3 layers of the base
-    const layer1Extrude = wallExtrude(context, id + 'Layer1Extrude', baseSketch.region, {
+    const layer1Extrude = wallExtrude(context, id + 'Layer1', baseSketch.region, {
         depth: Dims.baseLayer1Height,
         filletRadius: Dims.baseFillet,
         draftAngle: Dims.baseDraftAngle,
     });
 
-    const layer2Extrude = wallExtrude(context, id + 'Layer2Extrude', layer1Extrude.topFace, {
+    const layer2Extrude = wallExtrude(context, id + 'Layer2', findFace(context, layer1Extrude.id, FaceType.TOP), {
         depth: Dims.baseLayer2Height,
     });
 
-    const layer3Extrude = wallExtrude(context, id + 'Layer3Extrude', layer2Extrude.topFace, {
+    const layer3Extrude = wallExtrude(context, id + 'Layer3', findFace(context, layer2Extrude.id, FaceType.TOP), {
         depth: Dims.baseLayer3Height,
         draftAngle: Dims.baseDraftAngle,
     });
@@ -254,7 +254,7 @@ function baseCreate(context is Context, definition is map, id is Id) {
     });
 
     // Merge all the bases into a single part
-    const allBases = mergeParts(context, id + 'AllBases', [
+    mergeParts(context, id + 'AllBases', [
         linearPatternId,
         basePart.id,
         layer4Extrude.id,
@@ -263,7 +263,7 @@ function baseCreate(context is Context, definition is map, id is Id) {
     // Remove sketches, they are not needed anymore
     removeBodies(context, id + 'DeleteBaseSketches', [baseSketch.id, layer4Sketch.id]);
 
-    return { 'id': allBases.id, 'topFace': layer4Extrude.topFace };
+    return { 'id': basePart.id, 'topLayerId': layer4Extrude.id };
 }
 
 
@@ -285,7 +285,7 @@ function baseSketch(context is Context, definition is map, id is Id) {
 
     skSolve(sketch);
 
-    return { 'id': sketchId, 'sketch': sketch, 'region': qSketchRegion(id, false) };
+    return { 'id': sketchId, 'region': qSketchRegion(sketchId, false) };
 }
 
 
@@ -307,7 +307,7 @@ function baseMagnetHolesSketch(context is Context, id is Id, definition is map, 
 
     skSolve(sketch);
 
-    return { 'id': id, 'sketch': sketch, 'region': qSketchRegion(id, false) };
+    return { 'id': sketchId, 'region': qSketchRegion(sketchId, false) };
 }
 
 
@@ -315,7 +315,7 @@ function baseLayer4Sketch(context is Context, definition is map, id is Id, layer
     const sketchId = id + 'Sketch';
 
     const tangentPlane = evFaceTangentPlane(context, {
-        'face': layer3Extrude.topFace,
+        'face': findFace(context, layer3Extrude.id, FaceType.TOP),
         'parameter': vector(0.5, 0.5),
     });
 
@@ -337,7 +337,7 @@ function baseLayer4Sketch(context is Context, definition is map, id is Id, layer
 
     skSolve(sketch);
 
-    return { 'id': sketchId, 'sketch': sketch, 'region': qSketchRegion(id, false) };
+    return { 'id': sketchId, 'region': qSketchRegion(sketchId, false) };
 }
 
 
@@ -353,42 +353,13 @@ function baseCalculateBottomSize() {
  */
 
 function bodyCreate(context is Context, definition is map, id is Id, base is map) {
-    const bodyExtrude = wallExtrude(context, id + 'BodyExtrude', base.topFace, {
+    const topFace = findFace(context, base.topLayerId, FaceType.TOP);
+    
+    const bodyExtrude = wallExtrude(context, id + 'Body', topFace, {
         depth: Dims.unitHeight * (definition.height - 1),
     });
 
-    return { 'id': bodyExtrude.id, 'topFace': findFace(context, bodyExtrude.id, FaceType.TOP) };
-}
-
-
-function shellCreate(context is Context, definition is map, id is Id, base is map, body is map) {
-    const extrudeId1 = id + 'BodyShellExtrude1';
-    const extrudeId2 = id + 'BodyShellExtrude2';
-
-    const tangentPlane = evFaceTangentPlane(context, {
-        'face': findFace(context, body.id, FaceType.TOP),
-        'parameter': vector(0.5, 0.5),
-    });
-    
-    opExtrude(context, extrudeId1, {
-        'entities': findFace(context, body.id, FaceType.TOP),
-        'direction': vector(-tangentPlane.normal[0], -tangentPlane.normal[1], -tangentPlane.normal[2]),
-        'endBound': BoundingType.BLIND,
-        'endDepth': Dims.unitHeight * (definition.height - 1),
-        'operationType' : NewBodyOperationType.REMOVE
-    });
-
-    opExtrude(context, extrudeId2, {
-        'entities': findFace(context, body.id, FaceType.TOP),
-        'direction': vector(-tangentPlane.normal[0], -tangentPlane.normal[1], -tangentPlane.normal[2]),
-        'endBound': BoundingType.BLIND,
-        'endDepth': Dims.unitHeight * (definition.height - 1),
-        'operationType' : NewBodyOperationType.REMOVE
-    });
-
-    substractParts(context, id + 'SubstractShell', base.id, [extrudeId1, extrudeId2]);
-
-    return { 'id': body.id, 'topFace': findFace(context, body.id, FaceType.TOP) };
+    return { 'id': bodyExtrude.id };
 }
 
 
@@ -400,24 +371,26 @@ function shellCreate(context is Context, definition is map, id is Id, base is ma
 
 function topCreate(context is Context, definition is map, id is Id, body is map) {
     const sweepId = id + 'Sweep';
-    const lipSketch = topLipSketch(context, definition, id + 'Lip', body.topFace);
+    
+    const lipSketch = topLipSketch(context, definition, id + 'Lip', body);
+    const topFace = findFace(context, body.id, FaceType.TOP);
 
     opSweep(context, sweepId, {
         'profiles': lipSketch.region,
-        'path': qLoopEdges(body.topFace),
+        'path': qLoopEdges(topFace),
     });
 
     removeBodies(context, id + 'DeleteLipSketch', [lipSketch.id]);
 
-    return { 'id': sweepId, 'topFace': findFace(context, sweepId, FaceType.TOP) };
+    return { 'id': sweepId };
 }
 
 
-function topLipSketch(context is Context, definition is map, id is Id, topFace is map) {
+function topLipSketch(context is Context, definition is map, id is Id, top is map) {
     const sketchId = id + 'Sketch';
 
     const tangentPlane = evFaceTangentPlane(context, {
-        'face': topFace,
+        'face': findFace(context, top.id, FaceType.TOP),
         'parameter': vector(0.5, 0)
     });
 
@@ -454,7 +427,7 @@ function topLipSketch(context is Context, definition is map, id is Id, topFace i
 
     skSolve(sketch);
 
-    return { 'id': sketchId, 'sketch': sketch, 'region': qSketchRegion(id, false) };
+    return { 'id': sketchId, 'region': qSketchRegion(sketchId, false) };
 }
 
 
@@ -506,7 +479,30 @@ function topLipSketch(context is Context, definition is map, id is Id, topFace i
         });
     }
 
-    return { 'id': extrudeId, 'topFace': findFace(context, extrudeId, FaceType.TOP) };
+    return { 'id': extrudeId };
+}
+
+
+function hollowFace(context is Context, id is Id, sourceId is Id, targetId is Id, depth is ValueWithUnits) {
+    const extrudeId = id + 'Extrude';
+    const topFace = findFace(context, targetId, FaceType.TOP);
+
+    const tangentPlane = evFaceTangentPlane(context, {
+        'face': topFace,
+        'parameter': vector(0.5, 0.5),
+    });
+    
+    opExtrude(context, extrudeId, {
+        'entities': topFace,
+        'direction': vector(-tangentPlane.normal[0], -tangentPlane.normal[1], -tangentPlane.normal[2]),
+        'endBound': BoundingType.BLIND,
+        'endDepth': depth,
+        'operationType' : NewBodyOperationType.REMOVE
+    });
+
+    substractParts(context, id + 'SubstractShell', sourceId, [extrudeId]);
+
+    return { 'id': targetId };
 }
 
 
