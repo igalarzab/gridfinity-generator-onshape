@@ -7,7 +7,7 @@
  * <https://x.com/igalarzab>
  * 
  * You can submit bugs and feature requests in:
- * <https://github.com/igalarzab/gridfinity-onshape/>
+ * <https://github.com/igalarzab/gridfinity-generator-onshape/>
  * 
  * Gridfinity is an original idea developed by Zach Freedman
  * <https://www.youtube.com/@ZackFreedman>
@@ -49,9 +49,11 @@ const Dims = {
     baseLayer4Height: 2.25 * millimeter,
 
     bodyFillet: 3.75 * millimeter,
+    bodyInternalFillet: 2.55 * millimeter,
     bodyWallThickness: 1.2 * millimeter,
 
     topHeight: 4.4 * millimeter,
+    topRoundedLipFillet: 0.5 * millimeter,
 };
 
 
@@ -61,6 +63,21 @@ const Dims = {
  *
  */
 
+export enum TopLipShape {
+    SHARP, ROUNDED
+}
+
+
+export enum FillType {
+    COMPLETE, UNTIL_LIP
+}
+
+
+enum FaceType {
+    TOP, BOTTOM, LEFT
+}
+
+
 const Planes = {
     top: qCreatedBy(makeId('Top'), EntityType.FACE),
     right: qCreatedBy(makeId('Right'), EntityType.FACE),
@@ -68,22 +85,22 @@ const Planes = {
 };
 
 
-export enum FaceType {
-    TOP, BOTTOM
-}
-
-export enum TopLipShape {
-    SHARP, ROUNDED
-}
-
-export enum FillType {
-    COMPLETE, UNTIL_LIP
-}
-
-
 // Ranges -> (min, default, max)
 const MAGNETS_RADIUS_RANGE = [0.5, 3.25, 4.25];
 const MAGNETS_DEPTH_RANGE = [0.5, 2.4, 4];
+
+
+// Sweep contour for each lid type (in mm)
+const LID_SWEEP = {
+    TopLipShape.SHARP: {
+        x: [0.0, 4.4,  2.5,  0.7,  0.0,  0.0, -2.6, 0.0],
+        y: [0.0, 0.0, -1.9, -1.9, -2.6, -2.6,  0.0, 0.0],
+    },
+    TopLipShape.ROUNDED: {
+        x: [0.0, 4.4,   4.4, 3.05, 1.25, 0.55,  0.0, -2.6, 0.0],
+        y: [0.0, 0.0, -0.55, -1.9, -1.9, -2.6, -2.6,  0.0, 0.0],
+    }
+};
 
 
 /**
@@ -161,17 +178,14 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
         const base = baseCreate(context, definition, id + 'Base');
         const body = bodyCreate(context, definition, id + 'Body', base);
         const top = topCreate(context, definition, id + 'Top', body);
-
+        
         // Merge everything in one part
         mergeParts(context, id + 'Bin', [base.id, body.id, top.id]);
 
-        // TODO: Move this to bodyCreate if we are able to offset the hollow inside
-        hollowFace(context, id + 'HollowBin', base.id, body.id, Dims.unitHeight * (definition.height - 1));
-
-        // Center in (0, 0, 0) the resulting part
+        // Center the bin in the origin
         centerPart(context, id + 'Center', base.id);
 
-        // Rename the part
+        // Rename the bin
         renamePart(context, base.id, 'Gridfinity Bin ' ~ definition.rows ~ 'x' ~ definition.columns);
     }
 );
@@ -255,15 +269,15 @@ function baseCreate(context is Context, definition is map, id is Id) {
 
     // Merge all the bases into a single part
     mergeParts(context, id + 'AllBases', [
-        linearPatternId,
         basePart.id,
+        linearPatternId,
         layer4Extrude.id,
     ]);
 
     // Remove sketches, they are not needed anymore
     removeBodies(context, id + 'DeleteBaseSketches', [baseSketch.id, layer4Sketch.id]);
 
-    return { 'id': basePart.id, 'topLayerId': layer4Extrude.id };
+    return { 'id': basePart.id, 'layer4Id': layer4Extrude.id, 'layer3Id': layer3Extrude.id };
 }
 
 
@@ -353,13 +367,57 @@ function baseCalculateBottomSize() {
  */
 
 function bodyCreate(context is Context, definition is map, id is Id, base is map) {
-    const topFace = findFace(context, base.topLayerId, FaceType.TOP);
-    
+    const topFace = findFace(context, base.layer4Id, FaceType.TOP);
+
     const bodyExtrude = wallExtrude(context, id + 'Body', topFace, {
         depth: Dims.unitHeight * (definition.height - 1),
     });
 
+    if (!definition.filled) {
+        const sketch = bodyHollowSketch(context, definition, id + 'Body', base);
+        
+        const hollowExtrude = wallExtrude(context, id + 'Hollow', sketch.region, {
+            depth: Dims.unitHeight * (definition.height - 1),
+            filletRadius: Dims.bodyInternalFillet,
+        });
+        
+        substractParts(context, id, bodyExtrude.id, [hollowExtrude.id]);
+        removeBodies(context, id + 'DeleteBodyHollowSketch', [sketch.id]);
+    }
+    
     return { 'id': bodyExtrude.id };
+}
+
+
+function bodyHollowSketch(context is Context, definition is map, id is Id, base is map) {
+    const sketchId = id + 'Sketch';
+
+    const tangentPlane = evFaceTangentPlane(context, {
+        'face': findFace(context, base.layer4Id, FaceType.TOP),
+        'parameter': vector(0.5, 0.5),
+    });
+
+    const sketch = newSketchOnPlane(context, sketchId, {
+        'sketchPlane' : tangentPlane
+    });
+
+    const totalX = (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
+    const totalY = (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+
+    const bottomSize = baseCalculateBottomSize();
+    const translateX = ((Dims.unitSize / 2) * definition.rows) - Dims.unitSeparator;
+    const translateY = ((Dims.unitSize / 2) * definition.columns) - Dims.unitSeparator;
+    
+    const offset = Dims.bodyWallThickness;
+
+    skRectangle(sketch, 'rectangle', {
+        'firstCorner': vector(offset - translateX, offset - translateY),
+        'secondCorner': vector(totalX - translateX - offset, totalY - translateY - offset)
+    });
+
+    skSolve(sketch);
+
+    return { 'id': sketchId, 'region': qSketchRegion(sketchId, false) };
 }
 
 
@@ -370,19 +428,44 @@ function bodyCreate(context is Context, definition is map, id is Id, base is map
  */
 
 function topCreate(context is Context, definition is map, id is Id, body is map) {
-    const sweepId = id + 'Sweep';
-    
-    const lipSketch = topLipSketch(context, definition, id + 'Lip', body);
     const topFace = findFace(context, body.id, FaceType.TOP);
+    const topId = id + 'Top';
 
-    opSweep(context, sweepId, {
+    // If the bin should be filled completely we extrude the whole top    
+    if (definition.filled && definition.fillType == FillType.COMPLETE) {        
+        wallExtrude(context, topId, topFace, {
+            'depth': Dims.topHeight,
+        });
+        
+        return { 'id': topId };
+    }
+
+    // Otherwise we prepare the sweep to create the lid
+    const lipSketch = topLipSketch(context, definition, id + 'Lip', body);
+    const bodyLoops = qIntersection(qCreatedBy(body.id, EntityType.EDGE), qLoopEdges(topFace));
+        
+    opSweep(context, topId, {
         'profiles': lipSketch.region,
-        'path': qLoopEdges(topFace),
+        'path': bodyLoops,
     });
+    
+        
+    // The rounded shape needs some fillets
+    if (definition.lipShape == TopLipShape.ROUNDED) {
+        const topLoops = qLoopEdges(findFace(context, topId, FaceType.TOP));
+        const leftFaceLoops = qLoopEdges(findFace(context, topId, FaceType.LEFT));
+        const topEdge = qIntersection(topLoops, leftFaceLoops);
+        
+        opFillet(context, id + 'TopFillet', {
+           'entities': topEdge,
+            'radius' : Dims.topRoundedLipFillet,
+            'tangentPropagation': true,
+        });
+    }
 
     removeBodies(context, id + 'DeleteLipSketch', [lipSketch.id]);
 
-    return { 'id': sweepId };
+    return { 'id': topId };
 }
 
 
@@ -404,19 +487,8 @@ function topLipSketch(context is Context, definition is map, id is Id, top is ma
         'sketchPlane' : perpendicularPlane
     });
     
-    var x = undefined;
-    var y = undefined;
-
-    // This is the sweep contour for the stacking lip
-    if (definition.lipShape == TopLipShape.SHARP) {
-        x = [0.0, 4.4, 4.4,  2.5,  0.7,  0.0,  0.0, 0.0];
-        y = [0.0, 0.0, 0.0, -1.9, -1.9, -2.6, -2.6, 0.0];
-    } else if (definition.lipShape == TopLipShape.ROUNDED) {
-        x = [0.0, 4.4,   4.4, 3.05, 1.25, 0.55,  0.0, 0.0];
-        y = [0.0, 0.0, -0.55, -1.9, -1.9, -2.6, -2.6, 0.0];
-    } else {
-        throw 'Invalid TopLipShape value: ' ~ definition.lipShape;
-    }
+    const x = LID_SWEEP[definition.lipShape]['x'];
+    const y = LID_SWEEP[definition.lipShape]['y'];
 
     for (var i = 0; i != size(x)-1; i += 1) {
         skLineSegment(sketch, 'Line' ~ i, {
@@ -483,29 +555,6 @@ function topLipSketch(context is Context, definition is map, id is Id, top is ma
 }
 
 
-function hollowFace(context is Context, id is Id, sourceId is Id, targetId is Id, depth is ValueWithUnits) {
-    const extrudeId = id + 'Extrude';
-    const topFace = findFace(context, targetId, FaceType.TOP);
-
-    const tangentPlane = evFaceTangentPlane(context, {
-        'face': topFace,
-        'parameter': vector(0.5, 0.5),
-    });
-    
-    opExtrude(context, extrudeId, {
-        'entities': topFace,
-        'direction': vector(-tangentPlane.normal[0], -tangentPlane.normal[1], -tangentPlane.normal[2]),
-        'endBound': BoundingType.BLIND,
-        'endDepth': depth,
-        'operationType' : NewBodyOperationType.REMOVE
-    });
-
-    substractParts(context, id + 'SubstractShell', sourceId, [extrudeId]);
-
-    return { 'id': targetId };
-}
-
-
 function mergeParts(context is Context, id is Id, partIds is array) {
     var parts = [];
     var firstPartId = undefined;
@@ -557,20 +606,27 @@ function substractParts(context is Context, id is Id, targetId is Id, partIds is
 
 function findFace(context is Context, id is Id, face is FaceType) {
     const allFaces = evaluateQuery(context, qCreatedBy(id, EntityType.FACE));
-
-    if (face != FaceType.TOP && face != FaceType.BOTTOM) {
+    var vectorValue = undefined;
+    
+    if (face == FaceType.TOP) {
+        vectorValue = vector(0, 0, 1);
+    } else if (face == FaceType.BOTTOM) {
+        vectorValue = vector(0, 0, -1);
+    } else if (face == FaceType.LEFT) {
+        vectorValue = vector(-1, 0, 0);
+    } else {
         throw 'Invalid FaceType value: ' ~ face;
     }
 
     for (var f in allFaces) {
         const plane = evFaceTangentPlane(context, { 'face': f, parameter: vector(0.5, 0.5) });
 
-        if (plane.normal == vector(0, 0, face == FaceType.TOP ? 1 : -1)) {
+        if (plane.normal == vectorValue) {
             return f;
         }
     }
 
-    debug(context, 'No top face found for ' ~ id);
+    debug(context, 'No ' ~ face ~ ' face found for ' ~ id, DebugColor.RED);
     debug(context, allFaces);
 
     return undefined;
