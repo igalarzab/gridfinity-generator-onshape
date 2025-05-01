@@ -130,9 +130,6 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
             annotation { 'Name' : 'Fill the bin' }
             definition.filled is boolean;
 
-            annotation { 'Name' : 'Add Stackable Lip', 'Default': true }
-            definition.stackableLip is boolean;
-
             annotation { 'Name' : 'Add Magnets', 'Default': true }
             definition.magnets is boolean;
 
@@ -164,12 +161,10 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
             }
         }
 
-        if (definition.stackableLip) {
-            annotation { 'Group Name' : 'Stackable Lip Config', 'Collapsed By Default' : true }
-            {
-                annotation { 'Name' : 'Shape', 'Default': TopLipShape.SHARP }
-                definition.lipShape is TopLipShape;
-            }
+        annotation { 'Group Name' : 'Stackable Lip Config', 'Collapsed By Default' : true }
+        {
+            annotation { 'Name' : 'Shape', 'Default': TopLipShape.SHARP }
+            definition.lipShape is TopLipShape;
         }
 
     }
