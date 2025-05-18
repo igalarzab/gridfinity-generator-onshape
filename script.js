@@ -25,6 +25,8 @@ FeatureScript 2625;
 import(path: 'onshape/std/common.fs', version: '2625.0');
 import(path: 'onshape/std/geometry.fs', version: '2625.0');
 
+icon::import(path : "ee93c9c076a700a661adcd6f", version : "cc6e67e2b4cf4e6ce87b92f5");
+
 
 /**
  *
@@ -119,7 +121,7 @@ const LID_SWEEP = {
  *
  */
 
-annotation { 'Feature Type Name' : 'Gridfinity Bin', 'Feature Type Description' : 'Create a gridfinity bin' }
+annotation { 'Feature Type Name' : 'Gridfinity Bin', 'Feature Type Description' : 'Create a gridfinity bin', 'Icon': icon::BLOB_DATA }
 export const gridfinityBin = defineFeature(function(context is Context, id is Id, definition is map)
     precondition
     {
