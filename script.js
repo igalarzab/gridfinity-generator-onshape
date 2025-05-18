@@ -141,7 +141,7 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
         definition.magnets is boolean;
 
         if (definition.magnets) {
-            annotation { 'Group Name' : '', 'Collapsed By Default' : false, 'Driving Parameter' : 'magnets' }
+            annotation { 'Group Name' : '', 'Collapsed By Default' : true, 'Driving Parameter' : 'magnets' }
             {
                 annotation { 'Name' : 'Radius' }
                 isLength(definition.baseMagnetRadius, { (millimeter): MAGNETS_RADIUS_RANGE } as LengthBoundSpec);
@@ -161,11 +161,11 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
                 definition.fillType is FillType;
             }
         }
-
+        
         if (!definition.filled || (definition.filled && definition.fillType == FillType.UNTIL_LIP)) {
             annotation { 'Name' : 'Stackable Lip', 'Default': true }
             definition.stackableLip is boolean;
-
+    
             if (definition.stackableLip) {
                 annotation { 'Group Name' : '', 'Collapsed By Default' : true, 'Driving Parameter' : 'stackableLip' }
                 {
@@ -192,7 +192,7 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
 
             annotation { 'Name' : 'Add Finger Slide', 'Default': true }
             definition.fingerSlide is boolean;
-
+            
             if (definition.fingerSlide) {
                 annotation { 'Group Name' : '', 'Collapsed By Default' : true, 'Driving Parameter' : 'fingerSlide' }
                 {
@@ -208,7 +208,7 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
         const base = baseCreate(context, definition, id + 'Base');
         const body = bodyCreate(context, definition, id + 'Body', base);
         const top = topCreate(context, definition, id + 'Top', body);
-
+        
         // Merge the base parts in one part
         mergeParts(context, id + 'BaseBin', [base, body, top]);
 
@@ -481,7 +481,7 @@ function topCreate(context is Context, definition is map, id is Id, body is map)
         return { 'id': topId };
     }
 
-    // If there is no stackable lip, just extrude
+    // If there is no stackable lip, just extrude    
     if (!definition.stackableLip) {
         wallExtrude(context, topId, topFace, {
             'depth': Dims.topHeight,
@@ -584,9 +584,9 @@ function labelSketch(context is Context, definition is map, id is Id, base is ma
         qLoopEdges(findFace(context, base.layer4Id, Orientation.TOP)),
         evPlane(context, {'face' : Planes.right}).normal
     );
-
+    
     const edgeMid = evEdgeTangentLine(context, {
-        'edge': findExtremeEdge(context, frontEdges, Orientation.LEFT),
+        'edge': findExtremeEdge(context, frontEdges, Orientation.RIGHT),
         'parameter': 0
     });
 
@@ -598,12 +598,12 @@ function labelSketch(context is Context, definition is map, id is Id, base is ma
     });
 
     var topHeight = ((definition.height - 1) * Dims.unitHeight) + Dims.topHeight;
-
+    
     if (definition.stackableLip) {
         topHeight = topHeight - Dims.topStackableLipHeight;
     }
 
-    skSafeOverhangTriangle(sketch, 0 * millimeter, topHeight - definition.labelOffset, definition.labelWidth);
+    skSafeOverhangTriangle(sketch, 0 * millimeter, topHeight - definition.labelOffset, -definition.labelWidth);
     skSolve(sketch);
 
     return { 'id': sketchId, 'region': qSketchRegion(sketchId, false) };
@@ -627,13 +627,13 @@ function fingerSlideCreate(context is Context, definition is map, id is Id, base
 
     if (definition.fingerSlideType == FingerSlideType.FILLET) {
         opFillet(context, id + 'TopFillet', {
-           'entities': findExtremeEdge(context, rightEdges, Orientation.RIGHT),
+           'entities': findExtremeEdge(context, rightEdges, Orientation.LEFT),
             'radius' : min(slideHeight, Dims.fingerSlideMaxHeight),
             'tangentPropagation': false,
         });
     } else if (definition.fingerSlideType == FingerSlideType.CHAMFER) {
         opChamfer(context, id + "chamfer1", {
-            "entities" : findExtremeEdge(context, rightEdges, Orientation.RIGHT),
+            "entities" : findExtremeEdge(context, rightEdges, Orientation.LEFT),
             "chamferType" : ChamferType.EQUAL_OFFSETS,
             "width" : min(slideHeight, Dims.fingerSlideMaxHeight),
         });
@@ -657,11 +657,11 @@ function skSafeOverhangTriangle(sketch is Sketch, point0 is ValueWithUnits, poin
 
     skLineSegment(sketch, 'Line' ~ 2, {
         'start' : vector(point2, point1),
-        'end' : vector(point0, point0 + point1 - point2)
+        'end' : vector(point0, point0 + point1 + point2)
     });
 
     skLineSegment(sketch, 'Line' ~ 3, {
-        'start' : vector(point0, point0 + point1 - point2),
+        'start' : vector(point0, point0 + point1 + point2),
         'end' : vector(point0, point1)
     });
 }
@@ -794,7 +794,7 @@ function findFace(context is Context, id is Id, face is Orientation) {
 function findExtremeEdge(context is Context, edgeQuery is Query, direction is Orientation) returns Query {
     const edges = evaluateQuery(context, edgeQuery);
     var bestPoint = (direction == Orientation.LEFT ? inf : -inf) * millimeter;
-
+    
     var bestEdge = undefined;
     var dimension = undefined;
 
