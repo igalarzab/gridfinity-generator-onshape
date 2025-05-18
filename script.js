@@ -295,8 +295,8 @@ function baseCreate(context is Context, definition is map, id is Id) {
             'directionTwo': Planes.front,
             'distance': Dims.unitSize,
             'distanceTwo': Dims.unitSize,
-            'instanceCount': definition.rows,
-            'instanceCountTwo': definition.columns,
+            'instanceCount': definition.columns,
+            'instanceCountTwo': definition.rows,
         });
     }
 
@@ -383,8 +383,8 @@ function baseLayer4Sketch(context is Context, definition is map, id is Id, layer
         'sketchPlane' : tangentPlane
     });
 
-    const totalX = (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
-    const totalY = (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+    const totalX = (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+    const totalY = (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
 
     const bottomSize = baseCalculateBottomSize();
     const translateX = (bottomSize / 2) + Dims.baseLayer1Height + Dims.baseLayer3Height;
@@ -447,11 +447,11 @@ function bodyHollowSketch(context is Context, definition is map, id is Id, base 
         'sketchPlane' : tangentPlane
     });
 
-    const totalX = (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
-    const totalY = (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+    const totalX = (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+    const totalY = (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
 
-    const translateX = ((Dims.unitSize / 2) * definition.rows) - Dims.unitSeparator;
-    const translateY = ((Dims.unitSize / 2) * definition.columns) - Dims.unitSeparator;
+    const translateX = ((Dims.unitSize / 2) * definition.columns) - Dims.unitSeparator;
+    const translateY = ((Dims.unitSize / 2) * definition.rows) - Dims.unitSeparator;
 
     const offset = definition.bodyWallThicknes;
 
@@ -571,7 +571,7 @@ function labelCreate(context is Context, definition is map, id is Id, base is ma
         'entities' : labelSketch.region,
         'direction' : evPlane(context, {'face' : Planes.right}).normal,
         'endBound' : BoundingType.BLIND,
-        'endDepth' : (Dims.unitSize * definition.rows) - (definition.bodyWallThicknes * 2)
+        'endDepth' : (Dims.unitSize * definition.columns) - (definition.bodyWallThicknes * 2)
     });
 
     removeBodies(context, id + 'DeleteLabelSketch', [labelSketch.id]);
