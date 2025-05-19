@@ -56,7 +56,7 @@ const Dims = {
     topHeight: 4.4 * millimeter,
     topRoundedLipFillet: 0.5 * millimeter,
     topStackableLipHeight: 5.8 * millimeter,
-    fingerSlideMaxHeight: 15 * millimeter,
+    topStackableLipWidth: 1 * millimeter,
 };
 
 
@@ -77,7 +77,7 @@ export enum FillType {
 
 
 export enum FingerSlideType {
-    CHAMFER, FILLET
+    CHAMFER, ROUNDED
 }
 
 
@@ -99,7 +99,8 @@ const MAGNETS_RADIUS_RANGE = [0.5, 3.25, 4.25];
 const MAGNETS_DEPTH_RANGE = [0.5, 2.4, 4];
 const LABEL_WIDTH_RANGE = [1, 13, 100];
 const LABEL_OFFSET_RANGE = [0, 0.5, 100];
-const BODY_WALL_THICKNESS_RANGE = [1.2, 1.8, 10];
+const BODY_WALL_THICKNESS_RANGE = [1.2, 1.6, 10];
+const FINGER_SLIDE_HEIGHT_RANGE = [2, 10, 15];
 
 
 // Sweep contour for each lid type (in mm)
@@ -196,8 +197,11 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
             if (definition.fingerSlide) {
                 annotation { 'Group Name' : '', 'Collapsed By Default' : true, 'Driving Parameter' : 'fingerSlide' }
                 {
-                    annotation { 'Name' : 'Shape', 'Default': FingerSlideType.FILLET }
+                    annotation { 'Name' : 'Shape', 'Default': FingerSlideType.ROUNDED }
                     definition.fingerSlideType is FingerSlideType;
+
+                    annotation { 'Name' : 'Height' }
+                    isLength(definition.fingerSlideHeight, { (millimeter): FINGER_SLIDE_HEIGHT_RANGE } as LengthBoundSpec);
                 }
             }
         }
@@ -454,9 +458,14 @@ function bodyHollowSketch(context is Context, definition is map, id is Id, base 
     const translateY = ((Dims.unitSize / 2) * definition.rows) - Dims.unitSeparator;
 
     const offset = definition.bodyWallThicknes;
+    var sliderFingerOffset = 0 * millimeter;
+
+    if (definition.fingerSlide) {
+        sliderFingerOffset = Dims.topStackableLipWidth;
+    }
 
     skRectangle(sketch, 'rectangle', {
-        'firstCorner': vector(offset - translateX, offset - translateY),
+        'firstCorner': vector(offset - translateX, offset + sliderFingerOffset - translateY),
         'secondCorner': vector(totalX - translateX - offset, totalY - translateY - offset)
     });
 
@@ -626,20 +635,17 @@ function fingerSlideCreate(context is Context, definition is map, id is Id, base
         evPlane(context, {'face' : Planes.right}).normal
     );
 
-    // We only allow 5mm per height unit so the slide doesn't touch the top
-    const slideHeight = 5 * definition.height * millimeter;
-
-    if (definition.fingerSlideType == FingerSlideType.FILLET) {
+    if (definition.fingerSlideType == FingerSlideType.ROUNDED) {
         opFillet(context, id + 'TopFillet', {
            'entities': findExtremeEdge(context, rightEdges, Orientation.LEFT),
-            'radius' : min(slideHeight, Dims.fingerSlideMaxHeight),
+            'radius' : definition.fingerSlideHeight,
             'tangentPropagation': false,
         });
     } else if (definition.fingerSlideType == FingerSlideType.CHAMFER) {
         opChamfer(context, id + "chamfer1", {
             "entities" : findExtremeEdge(context, rightEdges, Orientation.LEFT),
             "chamferType" : ChamferType.EQUAL_OFFSETS,
-            "width" : min(slideHeight, Dims.fingerSlideMaxHeight),
+            "width" : definition.fingerSlideHeight,
         });
     } else {
         throw 'Invalid FingerSlideType: ' ~ definition.fingerSlideType;
