@@ -20,12 +20,12 @@
  *
  */
 
-FeatureScript 2625;
+FeatureScript 2656;
 
-import(path: 'onshape/std/common.fs', version: '2625.0');
-import(path: 'onshape/std/geometry.fs', version: '2625.0');
+import(path: 'onshape/std/common.fs', version: '2656.0');
+import(path: 'onshape/std/geometry.fs', version: '2656.0');
 
-icon::import(path : "ee93c9c076a700a661adcd6f", version : "cc6e67e2b4cf4e6ce87b92f5");
+icon::import(path: 'ee93c9c076a700a661adcd6f', version: 'cc6e67e2b4cf4e6ce87b92f5');
 
 
 /**
@@ -106,12 +106,12 @@ const FINGER_SLIDE_HEIGHT_RANGE = [2, 10, 15];
 // Sweep contour for each lid type (in mm)
 const LID_SWEEP = {
     TopLipShape.SHARP: {
-        x: [0.0, 4.4,  2.5,  0.7,  0.0,  0.0, -2.6, 0.0],
-        y: [0.0, 0.0, -1.9, -1.9, -2.6, -2.6,  0.0, 0.0],
+        x: [-2.6, 4.4, 2.5, 0.7, 0.0, -2.6],
+        y: [ 0.0, 0.0, 1.9, 1.9, 2.6,  0.0],
     },
     TopLipShape.ROUNDED: {
-        x: [0.0, 4.4,   4.4, 3.05, 1.25, 0.55,  0.0, -2.6, 0.0],
-        y: [0.0, 0.0, -0.55, -1.9, -1.9, -2.6, -2.6,  0.0, 0.0],
+        x: [-2.6, 4.4,  4.4, 3.05, 1.25, 0.55,  0.0, -2.6],
+        y: [ 0.0, 0.0, 0.55,  1.9,  1.9,  2.6,  2.6,  0.0],
     }
 };
 
@@ -191,7 +191,7 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
                 }
             }
 
-            annotation { 'Name' : 'Add Finger Slider', 'Default': true }
+            annotation { 'Name' : 'Add Finger Slide', 'Default': true }
             definition.fingerSlide is boolean;
 
             if (definition.fingerSlide) {
@@ -221,15 +221,15 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
         // Merge the base parts in one part
         mergeParts(context, id + 'BaseBin', [base, body, top]);
 
+        // Create the finger slide if needed
+        if (!definition.filled && definition.fingerSlide) {
+            const fingerSlide = fingerSlideCreate(context, definition, id + 'FingerSlide', base);
+        }
+
         // Create the label if needed
         if (!definition.filled && definition.label) {
             const label = labelCreate(context, definition, id + 'Label', base);
             mergeParts(context, id + 'BaseBinWithLabel', [base, label]);
-        }
-
-        // Create the finger slide if needed
-        if (!definition.filled && definition.fingerSlide) {
-            const fingerSlide = fingerSlideCreate(context, definition, id + 'FingerSlide', base);
         }
 
         // Center the bin in the origin
@@ -248,7 +248,7 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
  */
 
 function baseCreate(context is Context, definition is map, id is Id) {
-    const baseSketch = baseSketch(context, definition, id + 'BaseSketch');
+    const baseSketch = baseSketch(context, definition, id + 'Sketch');
 
     // Create the 3 layers of the base
     const layer1Extrude = wallExtrude(context, id + 'Layer1', baseSketch.region, {
@@ -327,7 +327,7 @@ function baseCreate(context is Context, definition is map, id is Id) {
     // Remove sketches, they are not needed anymore
     removeBodies(context, id + 'DeleteBaseSketches', [baseSketch.id, layer4Sketch.id]);
 
-    return { 'id': basePart.id, 'layer4Id': layer4Extrude.id, 'layer3Id': layer3Extrude.id };
+    return { 'id': basePart.id, 'layer4Id': layer4Extrude.id };
 }
 
 
@@ -339,12 +339,10 @@ function baseSketch(context is Context, definition is map, id is Id) {
     });
 
     const bottomSize = baseCalculateBottomSize();
-    const translateX = (bottomSize / 2);
-    const translateY = (bottomSize / 2);
 
     skRectangle(sketch, 'bottomSketchRectangle', {
-        'firstCorner': vector(-translateX, -translateY),
-        'secondCorner': vector(bottomSize - translateX, bottomSize - translateY)
+        'firstCorner': vector(0, 0) * millimeter,
+        'secondCorner': vector(bottomSize, bottomSize)
     });
 
     skSolve(sketch);
@@ -356,18 +354,24 @@ function baseSketch(context is Context, definition is map, id is Id) {
 function baseMagnetHolesSketch(context is Context, id is Id, definition is map, base is map) {
     const sketchId = id + 'Sketch';
 
-    const sketch = newSketch(context, sketchId, {
-        'sketchPlane' : findFace(context, base.id, Orientation.BOTTOM),
+    // Create a plane in the center of the base to make maths for the magnets simpler
+    const tangentPlane = evFaceTangentPlane(context, {
+        'face': findFace(context, base.id, Orientation.BOTTOM),
+        'parameter': vector(0.5, 0.5),
+    });
+
+    const sketch = newSketchOnPlane(context, sketchId, {
+        'sketchPlane' : tangentPlane,
     });
 
     const bottomSize = baseCalculateBottomSize();
-    const x = (bottomSize / 2) - Dims.baseHoleClearance;
+    const x =  (bottomSize / 2) - Dims.baseHoleClearance;
     const y = -(bottomSize / 2) + Dims.baseHoleClearance;
 
-    skCircle(sketch, 'bottomRight', { 'center' : vector(x, x), 'radius' : definition.baseMagnetRadius });
-    skCircle(sketch, 'topRight',    { 'center' : vector(x, y), 'radius' : definition.baseMagnetRadius });
-    skCircle(sketch, 'bottomLeft',  { 'center' : vector(y, x), 'radius' : definition.baseMagnetRadius });
-    skCircle(sketch, 'topLeft',     { 'center' : vector(y, y), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'topRight',    { 'center' : vector(x, x), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'bottomRight', { 'center' : vector(x, y), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'topLeft',     { 'center' : vector(y, x), 'radius' : definition.baseMagnetRadius });
+    skCircle(sketch, 'bottomLeft',  { 'center' : vector(y, y), 'radius' : definition.baseMagnetRadius });
 
     skSolve(sketch);
 
@@ -378,25 +382,17 @@ function baseMagnetHolesSketch(context is Context, id is Id, definition is map, 
 function baseLayer4Sketch(context is Context, definition is map, id is Id, layer3Extrude is map) {
     const sketchId = id + 'Sketch';
 
-    const tangentPlane = evFaceTangentPlane(context, {
-        'face': findFace(context, layer3Extrude.id, Orientation.TOP),
-        'parameter': vector(0.5, 0.5),
+    const sketch = newSketch(context, sketchId, {
+        'sketchPlane' : findFace(context, layer3Extrude.id, Orientation.TOP)
     });
 
-    const sketch = newSketchOnPlane(context, sketchId, {
-        'sketchPlane' : tangentPlane
-    });
-
-    const totalX = (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
-    const totalY = (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
-
-    const bottomSize = baseCalculateBottomSize();
-    const translateX = (bottomSize / 2) + Dims.baseLayer1Height + Dims.baseLayer3Height;
-    const translateY = (bottomSize / 2) + Dims.baseLayer1Height + Dims.baseLayer3Height;
+    const initXY = -baseCalculateOffset();
+    const endX = initXY + (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+    const endY = initXY + (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
 
     skRectangle(sketch, 'rectangle', {
-        'firstCorner': vector(-translateX, -translateY),
-        'secondCorner': vector(totalX - translateX, totalY - translateY)
+        'firstCorner': vector(initXY, initXY),
+        'secondCorner': vector(endX, endY)
     });
 
     skSolve(sketch);
@@ -407,6 +403,11 @@ function baseLayer4Sketch(context is Context, definition is map, id is Id, layer
 
 function baseCalculateBottomSize() {
     return Dims.unitSize - ((Dims.baseLayer1Height + Dims.baseLayer3Height + Dims.unitSeparator) * 2);
+}
+
+
+function baseCalculateOffset() {
+    return Dims.baseLayer1Height + Dims.baseLayer3Height;
 }
 
 
@@ -442,31 +443,26 @@ function bodyCreate(context is Context, definition is map, id is Id, base is map
 function bodyHollowSketch(context is Context, definition is map, id is Id, base is map) {
     const sketchId = id + 'Sketch';
 
-    const tangentPlane = evFaceTangentPlane(context, {
-        'face': findFace(context, base.layer4Id, Orientation.TOP),
-        'parameter': vector(0.5, 0.5),
+    const sketch = newSketch(context, sketchId, {
+        'sketchPlane' : findFace(context, base.layer4Id, Orientation.TOP)
     });
 
-    const sketch = newSketchOnPlane(context, sketchId, {
-        'sketchPlane' : tangentPlane
-    });
-
-    const totalX = (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
-    const totalY = (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
-
-    const translateX = ((Dims.unitSize / 2) * definition.columns) - Dims.unitSeparator;
-    const translateY = ((Dims.unitSize / 2) * definition.rows) - Dims.unitSeparator;
-
-    const offset = definition.bodyWallThicknes;
-    var sliderFingerOffset = 0 * millimeter;
+    var fingerSlideOffset = 0 * millimeter;
 
     if (definition.fingerSlide) {
-        sliderFingerOffset = max(0 * millimeter, Dims.topStackableLipWidth - definition.bodyWallThicknes);
+        fingerSlideOffset = max(0 * millimeter, Dims.topStackableLipWidth - definition.bodyWallThicknes);
     }
 
+    const offset = -baseCalculateOffset();
+
+    const initX = offset + definition.bodyWallThicknes;
+    const initY = offset + definition.bodyWallThicknes + fingerSlideOffset;
+    const endX  = offset - definition.bodyWallThicknes + (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+    const endY  = offset - definition.bodyWallThicknes + (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
+
     skRectangle(sketch, 'rectangle', {
-        'firstCorner': vector(offset - translateX, offset + sliderFingerOffset - translateY),
-        'secondCorner': vector(totalX - translateX - offset, totalY - translateY - offset)
+        'firstCorner': vector(initX, initY),
+        'secondCorner': vector(endX, endY)
     });
 
     skSolve(sketch);
@@ -485,17 +481,8 @@ function topCreate(context is Context, definition is map, id is Id, body is map)
     const topFace = findFace(context, body.id, Orientation.TOP);
     const topId = id + 'Top';
 
-    // If the bin should be filled completely we extrude the whole top
-    if (definition.filled && definition.fillType == FillType.COMPLETE) {
-        wallExtrude(context, topId, topFace, {
-            'depth': Dims.topHeight,
-        });
-
-        return { 'id': topId };
-    }
-
-    // If there is no stackable lip, just extrude
-    if (!definition.stackableLip) {
+    // If there is no stackable lip or the bin should be filled completely, we just extrude the top
+    if (!definition.stackableLip || (definition.filled && definition.fillType == FillType.COMPLETE)) {
         wallExtrude(context, topId, topFace, {
             'depth': Dims.topHeight,
         });
@@ -505,22 +492,21 @@ function topCreate(context is Context, definition is map, id is Id, body is map)
 
     // Otherwise we prepare the sweep to create the lid
     const lipSketch = topLipSketch(context, definition, id + 'Lip', body);
-    const bodyLoops = qIntersection(qCreatedBy(body.id, EntityType.EDGE), qLoopEdges(topFace));
+    const topLoop = qIntersection(qCreatedBy(body.id, EntityType.EDGE), qLoopEdges(topFace));
 
     opSweep(context, topId, {
         'profiles': lipSketch.region,
-        'path': bodyLoops,
+        'path': topLoop,
     });
 
-
-    // The rounded shape needs some fillets
+    // The rounded shape needs a fillet
     if (definition.lipShape == TopLipShape.ROUNDED) {
-        const topLoops = qLoopEdges(findFace(context, topId, Orientation.TOP));
-        const leftFaceLoops = qLoopEdges(findFace(context, topId, Orientation.LEFT));
-        const topEdge = qIntersection(topLoops, leftFaceLoops);
+        const lipLoop = qLoopEdges(findFace(context, topId, Orientation.TOP));
+        const leftFaceLoop = qLoopEdges(findFace(context, topId, Orientation.LEFT));
+        const lipLeftEdge = qIntersection(lipLoop, leftFaceLoop);
 
         opFillet(context, id + 'TopFillet', {
-           'entities': topEdge,
+           'entities': lipLeftEdge,
             'radius' : Dims.topStackableLipRoundedFillet,
             'tangentPropagation': true,
         });
@@ -540,9 +526,10 @@ function topLipSketch(context is Context, definition is map, id is Id, top is ma
         'parameter': vector(0.5, 0)
     });
 
+    // We need a plane perpendicular to the lid to create the sketch for the sweep
     const perpendicularPlane = plane(
         tangentPlane.origin,
-        tangentPlane.x,
+        -tangentPlane.x,
         tangentPlane.normal
     );
 
@@ -573,50 +560,56 @@ function topLipSketch(context is Context, definition is map, id is Id, top is ma
  */
 
 function labelCreate(context is Context, definition is map, id is Id, base is map) {
-    const labelSketch = labelSketch(context, definition, id + 'LabelSketch', base);
     const extrudeId = id + 'LabelExtrude';
+
+    const labelSketch = labelSketch(context, definition, id + 'LabelSketch', base);
+    const rightFace = findFace(context, base.layer4Id, Orientation.RIGHT);
 
     opExtrude(context, extrudeId, {
         'entities' : labelSketch.region,
         'direction' : evPlane(context, {'face' : Planes.right}).normal,
-        'endBound' : BoundingType.BLIND,
-        'endDepth' : (Dims.unitSize * definition.columns) - (definition.bodyWallThicknes * 2)
+        'endBound' : BoundingType.UP_TO_FACE,
+        'endBoundEntity' : rightFace
     });
 
     removeBodies(context, id + 'DeleteLabelSketch', [labelSketch.id]);
 
     return { 'id': extrudeId };
-
 }
 
 
 function labelSketch(context is Context, definition is map, id is Id, base is map) {
     const sketchId = id + 'Sketch';
+    const internalLoop = qLoopEdges(findFace(context, base.layer4Id, Orientation.TOP));
 
-    const frontEdges = qParallelEdges(
-        qLoopEdges(findFace(context, base.layer4Id, Orientation.TOP)),
-        evPlane(context, {'face' : Planes.right}).normal
+    const frontAndBackEdges = qParallelEdges(
+        internalLoop,
+        evPlane(context, {'face' : Planes.front}).x
     );
 
-    const edgeMid = evEdgeTangentLine(context, {
-        'edge': findExtremeEdge(context, frontEdges, Orientation.RIGHT),
-        'parameter': 0
-    });
+    const backEdge = findExtremeEdge(context, frontAndBackEdges, Orientation.BACK);
+    const backLine = evEdgeTangentLine(context, { 'edge': backEdge, 'parameter': 0 });
 
     const sketch = newSketchOnPlane(context, sketchId, {
         'sketchPlane' : plane(
-            edgeMid.origin - vector(Dims.bodyInternalFillet, 0 * millimeter, 0 * millimeter),
+            backLine.origin - vector(Dims.bodyInternalFillet, 0 * millimeter, 0 * millimeter),
             evPlane(context, {'face' : Planes.right}).normal
         )
     });
 
-    var topHeight = ((definition.height - 1) * Dims.unitHeight) + Dims.topHeight;
+    var heightToTop = ((definition.height - 1) * Dims.unitHeight) + Dims.topHeight;
 
     if (definition.stackableLip) {
-        topHeight = topHeight - Dims.topStackableLipHeight;
+        heightToTop = heightToTop - Dims.topStackableLipHeight;
     }
 
-    skSafeOverhangTriangle(sketch, 0 * millimeter, topHeight - definition.labelOffset, -definition.labelWidth);
+    skSafeOverhangTriangle(
+        sketch,
+        0 * millimeter,
+        heightToTop - definition.labelOffset,
+        -definition.labelWidth
+    );
+
     skSolve(sketch);
 
     return { 'id': sketchId, 'region': qSketchRegion(sketchId, false) };
@@ -630,25 +623,29 @@ function labelSketch(context is Context, definition is map, id is Id, base is ma
  */
 
 function fingerSlideCreate(context is Context, definition is map, id is Id, base is map) {
-    const rightEdges = qParallelEdges(
-        qLoopEdges(findFace(context, base.layer4Id, Orientation.TOP)),
-        evPlane(context, {'face' : Planes.right}).normal
+    const internalLoop = qLoopEdges(findFace(context, base.layer4Id, Orientation.TOP));
+
+    const frontAndBackEdges = qParallelEdges(
+        internalLoop,
+        evPlane(context, {'face' : Planes.front}).x
     );
+
+    const frontEdge = findExtremeEdge(context, frontAndBackEdges, Orientation.FRONT);
 
     if (definition.fingerSlideType == FingerSlideType.ROUNDED) {
         opFillet(context, id + 'TopFillet', {
-           'entities': findExtremeEdge(context, rightEdges, Orientation.LEFT),
+           'entities': frontEdge,
             'radius' : definition.fingerSlideHeight,
             'tangentPropagation': false,
         });
     } else if (definition.fingerSlideType == FingerSlideType.CHAMFER) {
-        opChamfer(context, id + "chamfer1", {
-            "entities" : findExtremeEdge(context, rightEdges, Orientation.LEFT),
-            "chamferType" : ChamferType.EQUAL_OFFSETS,
-            "width" : definition.fingerSlideHeight,
+        opChamfer(context, id + 'To', {
+            'entities' : frontEdge,
+            'chamferType' : ChamferType.EQUAL_OFFSETS,
+            'width' : definition.fingerSlideHeight,
         });
     } else {
-        throw 'Invalid FingerSlideType: ' ~ definition.fingerSlideType;
+        throw 'FingerSlideType not implemented: ' ~ definition.fingerSlideType;
     }
 }
 
@@ -782,8 +779,10 @@ function findFace(context is Context, id is Id, face is Orientation) {
         vectorValue = vector(0, 0, -1);
     } else if (face == Orientation.LEFT) {
         vectorValue = vector(-1, 0, 0);
+    } else if (face == Orientation.RIGHT) {
+        vectorValue = vector(1, 0, 0);
     } else {
-        throw 'Invalid Orientation value: ' ~ face;
+        throw 'Orientation not implemented: ' ~ face;
     }
 
     for (var f in allFaces) {
@@ -803,29 +802,34 @@ function findFace(context is Context, id is Id, face is Orientation) {
 
 function findExtremeEdge(context is Context, edgeQuery is Query, direction is Orientation) returns Query {
     const edges = evaluateQuery(context, edgeQuery);
-    var bestPoint = (direction == Orientation.LEFT ? inf : -inf) * millimeter;
 
-    var bestEdge = undefined;
-    var dimension = undefined;
+    const directionMap = {
+        Orientation.LEFT:   { 'dimension': 0, 'minimize': false },
+        Orientation.RIGHT:  { 'dimension': 0, 'minimize': true },
+        Orientation.BACK:   { 'dimension': 1, 'minimize': false },
+        Orientation.FRONT:  { 'dimension': 1, 'minimize': true },
+        Orientation.BOTTOM: { 'dimension': 2, 'minimize': false },
+        Orientation.TOP:    { 'dimension': 2, 'minimize': true }
+    };
 
-    if (direction == Orientation.TOP || direction == Orientation.BOTTOM) {
-        dimension = 0;
-    } else if (direction == Orientation.LEFT || direction == Orientation.RIGHT) {
-        dimension = 1;
-    } else if (direction == Orientation.FRONT || direction == Orientation.BACK) {
-        dimension = 2;
+    const dim = directionMap[direction].dimension;
+    const minimize = directionMap[direction].minimize;
+
+    if (dim == undefined || minimize == undefined) {
+        throw 'Direction not implemented ' ~ direction;
     }
 
+    var bestPoint = (minimize ? inf : -inf) * millimeter;
+    var bestEdge = undefined;
+
     for (var edge in edges) {
-        const point = evEdgeTangentLine(context, {
+        const midPoint = evEdgeTangentLine(context, {
             'edge': edge,
             'parameter': 0.5
-        });
+        }).origin[dim];
 
-        const p = point.origin[dimension];
-
-        if ((direction == Orientation.LEFT && p < bestPoint) || (direction == Orientation.RIGHT && p > bestPoint)) {
-            bestPoint = p;
+        if ((minimize && midPoint < bestPoint) || (!minimize && midPoint > bestPoint)) {
+            bestPoint = midPoint;
             bestEdge = edge;
         }
     }
