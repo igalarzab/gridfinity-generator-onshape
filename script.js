@@ -56,7 +56,7 @@ const Dims = {
     topHeight: 4.4 * millimeter,
     topRoundedLipFillet: 0.5 * millimeter,
     topStackableLipHeight: 5.8 * millimeter,
-    topStackableLipWidth: 1 * millimeter,
+    topStackableLipWidth: 2.6 * millimeter,
 };
 
 
@@ -461,7 +461,7 @@ function bodyHollowSketch(context is Context, definition is map, id is Id, base 
     var sliderFingerOffset = 0 * millimeter;
 
     if (definition.fingerSlide) {
-        sliderFingerOffset = Dims.topStackableLipWidth;
+        sliderFingerOffset = max(0 * millimeter, Dims.topStackableLipWidth - definition.bodyWallThicknes);
     }
 
     skRectangle(sketch, 'rectangle', {
