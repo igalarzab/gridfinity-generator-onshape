@@ -54,9 +54,9 @@ const Dims = {
     bodyInternalFillet: 2.55 * millimeter,
 
     topHeight: 4.4 * millimeter,
-    topRoundedLipFillet: 0.5 * millimeter,
-    topStackableLipHeight: 5.8 * millimeter,
     topStackableLipWidth: 2.6 * millimeter,
+    topStackableLipHeight: 5.8 * millimeter,
+    topStackableLipRoundedFillet: 0.5 * millimeter,
 };
 
 
@@ -164,7 +164,7 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
         }
 
         if (!definition.filled || (definition.filled && definition.fillType == FillType.UNTIL_LIP)) {
-            annotation { 'Name' : 'Stackable Lip', 'Default': true }
+            annotation { 'Name' : 'Add Stackable Lip', 'Default': true }
             definition.stackableLip is boolean;
 
             if (definition.stackableLip) {
@@ -191,7 +191,7 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
                 }
             }
 
-            annotation { 'Name' : 'Add Finger Slide', 'Default': true }
+            annotation { 'Name' : 'Add Finger Slider', 'Default': true }
             definition.fingerSlide is boolean;
 
             if (definition.fingerSlide) {
@@ -521,7 +521,7 @@ function topCreate(context is Context, definition is map, id is Id, body is map)
 
         opFillet(context, id + 'TopFillet', {
            'entities': topEdge,
-            'radius' : Dims.topRoundedLipFillet,
+            'radius' : Dims.topStackableLipRoundedFillet,
             'tangentPropagation': true,
         });
     }
