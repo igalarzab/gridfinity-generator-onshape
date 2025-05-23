@@ -146,6 +146,9 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
         if (definition.magnets) {
             annotation { 'Group Name' : '', 'Collapsed By Default' : true, 'Driving Parameter' : 'magnets' }
             {
+                annotation { 'Name' : 'Easy Remover',  'Default': true }
+                definition.baseMagnetEasyRemover is boolean;
+
                 annotation { 'Name' : 'Radius' }
                 isLength(definition.baseMagnetRadius, { (millimeter): MAGNETS_RADIUS_RANGE } as LengthBoundSpec);
 
@@ -291,7 +294,13 @@ function baseCreate(context is Context, definition is map, id is Id) {
 
     // Create the magnet holes if needed
     if (definition.magnets) {
-        const magnetHolesSketch = baseHolesSketch(context, id + 'Magnets', basePart, definition.baseMagnetRadius);
+        const magnetHolesSketch = baseHolesSketch(
+            context,
+            id + 'Magnets',
+            basePart,
+            definition.baseMagnetRadius,
+            definition.baseMagnetEasyRemover
+        );
 
         const magnets = wallExtrude(context, id + 'MagnetsExtrude', magnetHolesSketch.region, {
             depth: definition.baseMagnetDepth,
@@ -303,7 +312,13 @@ function baseCreate(context is Context, definition is map, id is Id) {
 
     // Create the screw holes if needed
     if (definition.screws) {
-        const screwHolesSketch = baseHolesSketch(context, id + 'Screws', basePart, definition.baseScrewRadius);
+        const screwHolesSketch = baseHolesSketch(
+            context,
+            id + 'Screws',
+            basePart,
+            definition.baseScrewRadius,
+            false
+        );
 
         const screws = wallExtrude(context, id + 'ScrewsExtrude', screwHolesSketch.region, {
             depth: definition.baseScrewDepth,
@@ -379,7 +394,7 @@ function baseSketch(context is Context, definition is map, id is Id) {
 }
 
 
-function baseHolesSketch(context is Context, id is Id, base is map, radius is ValueWithUnits) {
+function baseHolesSketch(context is Context, id is Id, base is map, radius is ValueWithUnits, easyRemover is boolean) {
     const sketchId = id + 'Sketch';
 
     // Create a plane in the center of the base to make maths for the magnets simpler
@@ -396,10 +411,20 @@ function baseHolesSketch(context is Context, id is Id, base is map, radius is Va
     const x =  (bottomSize / 2) - Dims.baseHoleClearance;
     const y = -(bottomSize / 2) + Dims.baseHoleClearance;
 
-    skCircle(sketch, 'topRight',    { 'center' : vector(x, x), 'radius' : radius });
-    skCircle(sketch, 'bottomRight', { 'center' : vector(x, y), 'radius' : radius });
-    skCircle(sketch, 'topLeft',     { 'center' : vector(y, x), 'radius' : radius });
-    skCircle(sketch, 'bottomLeft',  { 'center' : vector(y, y), 'radius' : radius });
+    skCircle(sketch, 'topRight',    { 'center': vector(x, x), 'radius': radius });
+    skCircle(sketch, 'bottomRight', { 'center': vector(x, y), 'radius': radius });
+    skCircle(sketch, 'topLeft',     { 'center': vector(y, x), 'radius': radius });
+    skCircle(sketch, 'bottomLeft',  { 'center': vector(y, y), 'radius': radius });
+
+    if (easyRemover) {
+        const p = radius * (sqrt(2) / 2);
+        const r = 0.8 * millimeter;
+
+        skCircle(sketch, 'topRightRemover',    { 'center': vector(x+p, x+p), 'radius': r });
+        skCircle(sketch, 'bottomRightRemover', { 'center': vector(x+p, y+p), 'radius': r });
+        skCircle(sketch, 'topLeftRemover',     { 'center': vector(y+p, x+p), 'radius': r });
+        skCircle(sketch, 'bottomLeftRemover',  { 'center': vector(y+p, y+p), 'radius': r });
+    }
 
     skSolve(sketch);
 
