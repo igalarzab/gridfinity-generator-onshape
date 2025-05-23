@@ -1,13 +1,14 @@
 # Gridfinity Onshape Generator
 
 ## Description
-Custom FeatureScript to generate gridfinity bins in onshape, with custom features, or filled 
+Custom FeatureScript to generate gridfinity bins in onshape, with custom features, or filled
 to the top to be able to cut out shapes on them.
 
 ## Features
 * All measurements strictly follow the gridfinity standard
 * Create bins of any size
-* Add magnets to the bottom and customise their size
+* Add magnets to the bottom, customise their size and add easy-removers for them
+* Add screws to the bottom and customise their size
 * Fill the bin until the lip, or fully to the top to be able to cut out shapes on it
 * Create two types of stackable lips: rounded or sharp
 * Add labels to your bins, and modify the width and offset of them

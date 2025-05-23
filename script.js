@@ -418,11 +418,11 @@ function baseHolesSketch(context is Context, id is Id, base is map, radius is Va
 
     if (easyRemover) {
         const p = radius * (sqrt(2) / 2);
-        const r = 0.8 * millimeter;
+        const r = 1.3 * millimeter;
 
-        skCircle(sketch, 'topRightRemover',    { 'center': vector(x+p, x+p), 'radius': r });
-        skCircle(sketch, 'bottomRightRemover', { 'center': vector(x+p, y+p), 'radius': r });
-        skCircle(sketch, 'topLeftRemover',     { 'center': vector(y+p, x+p), 'radius': r });
+        skCircle(sketch, 'topRightRemover',    { 'center': vector(x-p, x-p), 'radius': r });
+        skCircle(sketch, 'bottomRightRemover', { 'center': vector(x-p, y+p), 'radius': r });
+        skCircle(sketch, 'topLeftRemover',     { 'center': vector(y+p, x-p), 'radius': r });
         skCircle(sketch, 'bottomLeftRemover',  { 'center': vector(y+p, y+p), 'radius': r });
     }
 
