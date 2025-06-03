@@ -94,7 +94,7 @@ const Planes = {
 
 
 // Ranges -> (min, default, max)
-const UNIT_HEIGHT_RANGE = [3, 6, 50];
+const UNIT_HEIGHT_RANGE = [2, 6, 50];
 const MAGNETS_RADIUS_RANGE = [0.5, 3.25, 4.25];
 const MAGNETS_DEPTH_RANGE = [0.5, 2.4, 10];
 const SCREWS_RADIUS_RANGE = [0.5, 1.5, 4.25];
@@ -245,8 +245,8 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
             const fingerSlide = fingerSlideCreate(context, definition, id + 'FingerSlide', base);
         }
 
-        // Create the label if needed
-        if (!definition.filled && definition.label) {
+        // Create the label if needed (min height is 3 units)
+        if (!definition.filled && definition.label && definition.height > 2) {
             const label = labelCreate(context, definition, id + 'Label', base);
             mergeParts(context, id + 'BaseBinWithLabel', [base, label]);
         }
