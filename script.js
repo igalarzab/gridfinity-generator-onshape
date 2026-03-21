@@ -534,13 +534,18 @@ function topCreate(context is Context, definition is map, id is Id, body is map)
     const topFace = findFace(context, body.id, Orientation.TOP);
     const topId = id + 'Top';
 
-    // If there is no stackable lip or the bin should be filled completely, we just extrude the top
-    if (!definition.stackableLip || (definition.filled && definition.fillType == FillType.COMPLETE)) {
+    // If the bin should be filled completely, we extrude the top (stackable lip is implicit)
+    if (definition.filled && definition.fillType == FillType.COMPLETE) {
         wallExtrude(context, topId, topFace, {
             'depth': Dims.topHeight,
         });
 
         return { 'id': topId };
+    }
+
+    // If there is no stackable lip, total height is 7 * nU (no extra topHeight needed)
+    if (!definition.stackableLip) {
+        return { 'id': undefined };
     }
 
     // Otherwise we prepare the sweep to create the lid
@@ -650,10 +655,10 @@ function labelSketch(context is Context, definition is map, id is Id, base is ma
         )
     });
 
-    var heightToTop = ((definition.height - 1) * Dims.unitHeight) + Dims.topHeight;
+    var heightToTop = (definition.height - 1) * Dims.unitHeight;
 
     if (definition.stackableLip) {
-        heightToTop = heightToTop - Dims.topStackableLipHeight;
+        heightToTop = heightToTop + Dims.topHeight - Dims.topStackableLipHeight;
     }
 
     skSafeOverhangTriangle(
