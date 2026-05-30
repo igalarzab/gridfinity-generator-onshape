@@ -38,12 +38,14 @@ icon::import(path: 'ee93c9c076a700a661adcd6f', version: 'cc6e67e2b4cf4e6ce87b92f
  */
 
 const Dims = {
-    unitSize: 42 * millimeter,
     unitHeight: 7 * millimeter,
     unitSeparator: 0.25 * millimeter,
 
     baseFillet: 0.8 * millimeter,
     baseHoleClearance: 4.8 * millimeter,
+    baseHoleMinimumGap: 0.5 * millimeter,
+    baseHoleMinimumWall: 0.5 * millimeter,
+    baseHoleRemoverRadius: 1.3 * millimeter,
     baseDraftAngle: 45 * degree,
     baseLayer1Height: 0.8 * millimeter,
     baseLayer2Height: 1.8 * millimeter,
@@ -102,6 +104,7 @@ const SCREWS_DEPTH_RANGE = [0.5, 6, 10];
 const LABEL_WIDTH_RANGE = [1, 13, 100];
 const LABEL_OFFSET_RANGE = [0, 0.5, 100];
 const BODY_WALL_THICKNESS_RANGE = [1.2, 1.6, 10];
+const UNIT_SIZE_RANGE = [12, 42, 72];
 const FINGER_SLIDE_HEIGHT_RANGE = [2, 10, 15];
 
 
@@ -229,6 +232,9 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
         {
             annotation { 'Name' : 'Wall Thicknes', 'UIHint' : [UIHint.REMEMBER_PREVIOUS_VALUE] }
             isLength(definition.bodyWallThicknes, { (millimeter): BODY_WALL_THICKNESS_RANGE } as LengthBoundSpec);
+            
+            annotation { 'Name' : 'Unit Size', 'UIHint' : [UIHint.REMEMBER_PREVIOUS_VALUE] }
+            isLength(definition.unitSize, { (millimeter): UNIT_SIZE_RANGE } as LengthBoundSpec);
         }
     }
     {
@@ -294,38 +300,56 @@ function baseCreate(context is Context, definition is map, id is Id) {
 
     // Create the magnet holes if needed
     if (definition.magnets) {
-        const magnetHolesSketch = baseHolesSketch(
-            context,
-            id + 'Magnets',
-            basePart,
+        const enoughSizeForMagnets = baseHasEnoughSizeForHoles(
+            definition,
             definition.baseMagnetRadius,
             definition.baseMagnetEasyRemover
         );
 
-        const magnets = wallExtrude(context, id + 'MagnetsExtrude', magnetHolesSketch.region, {
-            depth: definition.baseMagnetDepth,
-        });
+        if (enoughSizeForMagnets) {
+            const magnetHolesSketch = baseHolesSketch(
+                context,
+                definition,
+                id + 'Magnets',
+                basePart,
+                definition.baseMagnetRadius,
+                definition.baseMagnetEasyRemover
+            );
 
-        substractParts(context, id + 'MagnetsHole', basePart.id, [magnets.id]);
-        removeBodies(context, id + 'DeleteMagnetsSketch', [magnetHolesSketch.id]);
+            const magnets = wallExtrude(context, id + 'MagnetsExtrude', magnetHolesSketch.region, {
+                depth: definition.baseMagnetDepth,
+            });
+
+            substractParts(context, id + 'MagnetsHole', basePart.id, [magnets.id]);
+            removeBodies(context, id + 'DeleteMagnetsSketch', [magnetHolesSketch.id]);
+        }
     }
 
     // Create the screw holes if needed
     if (definition.screws) {
-        const screwHolesSketch = baseHolesSketch(
-            context,
-            id + 'Screws',
-            basePart,
+        const enoughSizeForScrews = baseHasEnoughSizeForHoles(
+            definition,
             definition.baseScrewRadius,
             false
         );
 
-        const screws = wallExtrude(context, id + 'ScrewsExtrude', screwHolesSketch.region, {
-            depth: definition.baseScrewDepth,
-        });
+        if (enoughSizeForScrews) {
+            const screwHolesSketch = baseHolesSketch(
+                context,
+                definition,
+                id + 'Screws',
+                basePart,
+                definition.baseScrewRadius,
+                false
+            );
 
-        substractParts(context, id + 'ScrewsHole', basePart.id, [screws.id]);
-        removeBodies(context, id + 'DeleteScrewsSketch', [screwHolesSketch.id]);
+            const screws = wallExtrude(context, id + 'ScrewsExtrude', screwHolesSketch.region, {
+                depth: definition.baseScrewDepth,
+            });
+
+            substractParts(context, id + 'ScrewsHole', basePart.id, [screws.id]);
+            removeBodies(context, id + 'DeleteScrewsSketch', [screwHolesSketch.id]);
+        }
     }
 
     // Replicate the base for rows * columns
@@ -340,8 +364,8 @@ function baseCreate(context is Context, definition is map, id is Id) {
             'oppositeDirectionTwo': true,
             'directionOne': Planes.right,
             'directionTwo': Planes.front,
-            'distance': Dims.unitSize,
-            'distanceTwo': Dims.unitSize,
+            'distance': definition.unitSize,
+            'distanceTwo': definition.unitSize,
             'instanceCount': definition.columns,
             'instanceCountTwo': definition.rows,
         });
@@ -381,7 +405,7 @@ function baseSketch(context is Context, definition is map, id is Id) {
         'sketchPlane' : Planes.top,
     });
 
-    const bottomSize = baseCalculateBottomSize();
+    const bottomSize = baseCalculateBottomSize(definition);
 
     skRectangle(sketch, 'bottomSketchRectangle', {
         'firstCorner': vector(0, 0) * millimeter,
@@ -394,7 +418,7 @@ function baseSketch(context is Context, definition is map, id is Id) {
 }
 
 
-function baseHolesSketch(context is Context, id is Id, base is map, radius is ValueWithUnits, easyRemover is boolean) {
+function baseHolesSketch(context is Context, definition is map, id is Id, base is map, radius is ValueWithUnits, easyRemover is boolean) {
     const sketchId = id + 'Sketch';
 
     // Create a plane in the center of the base to make maths for the magnets simpler
@@ -407,7 +431,7 @@ function baseHolesSketch(context is Context, id is Id, base is map, radius is Va
         'sketchPlane' : tangentPlane,
     });
 
-    const bottomSize = baseCalculateBottomSize();
+    const bottomSize = baseCalculateBottomSize(definition);
     const x =  (bottomSize / 2) - Dims.baseHoleClearance;
     const y = -(bottomSize / 2) + Dims.baseHoleClearance;
 
@@ -418,7 +442,7 @@ function baseHolesSketch(context is Context, id is Id, base is map, radius is Va
 
     if (easyRemover) {
         const p = radius * (sqrt(2) / 2);
-        const r = 1.3 * millimeter;
+        const r = Dims.baseHoleRemoverRadius;
 
         skCircle(sketch, 'topRightRemover',    { 'center': vector(x-p, x-p), 'radius': r });
         skCircle(sketch, 'bottomRightRemover', { 'center': vector(x-p, y+p), 'radius': r });
@@ -440,8 +464,8 @@ function baseLayer4Sketch(context is Context, definition is map, id is Id, layer
     });
 
     const initXY = -baseCalculateOffset();
-    const endX = initXY + (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
-    const endY = initXY + (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
+    const endX = initXY + (definition.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+    const endY = initXY + (definition.unitSize * definition.rows) - (Dims.unitSeparator * 2);
 
     skRectangle(sketch, 'rectangle', {
         'firstCorner': vector(initXY, initXY),
@@ -454,8 +478,33 @@ function baseLayer4Sketch(context is Context, definition is map, id is Id, layer
 }
 
 
-function baseCalculateBottomSize() {
-    return Dims.unitSize - ((Dims.baseLayer1Height + Dims.baseLayer3Height + Dims.unitSeparator) * 2);
+function baseCalculateBottomSize(definition is map) {
+    return definition.unitSize - ((Dims.baseLayer1Height + Dims.baseLayer3Height + Dims.unitSeparator) * 2);
+}
+
+
+function baseHasEnoughSizeForHoles(definition is map, radius is ValueWithUnits, easyRemover is boolean) {
+    const bottomSize = baseCalculateBottomSize(definition);
+    const minimumInset = radius + Dims.baseHoleMinimumWall;
+    const minimumCenterDistance = baseHoleMinimumCenterDistance(radius, easyRemover);
+    const centerDistance = bottomSize - (Dims.baseHoleClearance * 2);
+
+    return Dims.baseHoleClearance >= minimumInset && centerDistance >= minimumCenterDistance;
+}
+
+
+function baseHoleMinimumCenterDistance(radius is ValueWithUnits, easyRemover is boolean) {
+    var minimumDistance = (radius * 2) + Dims.baseHoleMinimumGap;
+
+    if (easyRemover) {
+        const removerOffset = radius * (sqrt(2) / 2);
+        minimumDistance = max(
+            minimumDistance,
+            ((removerOffset + Dims.baseHoleRemoverRadius) * 2) + Dims.baseHoleMinimumGap
+        );
+    }
+
+    return minimumDistance;
 }
 
 
@@ -510,8 +559,8 @@ function bodyHollowSketch(context is Context, definition is map, id is Id, base 
 
     const initX = offset + definition.bodyWallThicknes;
     const initY = offset + definition.bodyWallThicknes + fingerSlideOffset;
-    const endX  = offset - definition.bodyWallThicknes + (Dims.unitSize * definition.columns) - (Dims.unitSeparator * 2);
-    const endY  = offset - definition.bodyWallThicknes + (Dims.unitSize * definition.rows) - (Dims.unitSeparator * 2);
+    const endX  = offset - definition.bodyWallThicknes + (definition.unitSize * definition.columns) - (Dims.unitSeparator * 2);
+    const endY  = offset - definition.bodyWallThicknes + (definition.unitSize * definition.rows) - (Dims.unitSeparator * 2);
 
     skRectangle(sketch, 'rectangle', {
         'firstCorner': vector(initX, initY),
