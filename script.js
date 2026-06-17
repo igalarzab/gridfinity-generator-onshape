@@ -97,9 +97,10 @@ const Planes = {
 
 // Ranges -> (min, default, max)
 const UNIT_HEIGHT_RANGE = [2, 6, 50];
-const MAGNETS_RADIUS_RANGE = [0.5, 3.25, 4.25];
+const MAGNETS_DIAMETER_RANGE = [1, 6.5, 8.5];
 const MAGNETS_DEPTH_RANGE = [0.5, 2.4, 10];
-const SCREWS_RADIUS_RANGE = [0.5, 1.5, 4.25];
+const MAGNET_LEAD_IN_SIZE_RANGE = [0.1, 0.2, 2];
+const SCREWS_DIAMETER_RANGE = [1, 3, 8.5];
 const SCREWS_DEPTH_RANGE = [0.5, 6, 10];
 const LABEL_WIDTH_RANGE = [1, 13, 100];
 const LABEL_OFFSET_RANGE = [0, 0.5, 100];
@@ -152,11 +153,20 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
                 annotation { 'Name' : 'Easy Remover',  'Default': true }
                 definition.baseMagnetEasyRemover is boolean;
 
-                annotation { 'Name' : 'Radius' }
-                isLength(definition.baseMagnetRadius, { (millimeter): MAGNETS_RADIUS_RANGE } as LengthBoundSpec);
+                annotation { 'Name' : 'Magnet Lead-In',  'Default': false }
+                definition.baseMagnetLeadIn is boolean;
+
+                annotation { 'Name' : 'Diameter' }
+                isLength(definition.baseMagnetDiameter, { (millimeter): MAGNETS_DIAMETER_RANGE } as LengthBoundSpec);
 
                 annotation { 'Name' : 'Depth' }
                 isLength(definition.baseMagnetDepth, { (millimeter): MAGNETS_DEPTH_RANGE } as LengthBoundSpec);
+
+                if (definition.baseMagnetLeadIn) {
+                    annotation { 'Name' : 'Lead-In Size' }
+                    isLength(definition.baseMagnetLeadInSize, { (millimeter): MAGNET_LEAD_IN_SIZE_RANGE } as LengthBoundSpec);
+                }
+
             }
         }
 
@@ -166,8 +176,8 @@ export const gridfinityBin = defineFeature(function(context is Context, id is Id
         if (definition.screws) {
             annotation { 'Group Name' : '', 'Collapsed By Default' : true, 'Driving Parameter' : 'screws' }
             {
-                annotation { 'Name' : 'Radius' }
-                isLength(definition.baseScrewRadius, { (millimeter): SCREWS_RADIUS_RANGE } as LengthBoundSpec);
+                annotation { 'Name' : 'Diameter' }
+                isLength(definition.baseScrewDiameter, { (millimeter): SCREWS_DIAMETER_RANGE } as LengthBoundSpec);
 
                 annotation { 'Name' : 'Depth' }
                 isLength(definition.baseScrewDepth, { (millimeter): SCREWS_DEPTH_RANGE } as LengthBoundSpec);
@@ -300,9 +310,10 @@ function baseCreate(context is Context, definition is map, id is Id) {
 
     // Create the magnet holes if needed
     if (definition.magnets) {
+        const magnetRadius = definition.baseMagnetDiameter / 2;
         const enoughSizeForMagnets = baseHasEnoughSizeForHoles(
             definition,
-            definition.baseMagnetRadius,
+            magnetRadius,
             definition.baseMagnetEasyRemover
         );
 
@@ -312,7 +323,7 @@ function baseCreate(context is Context, definition is map, id is Id) {
                 definition,
                 id + 'Magnets',
                 basePart,
-                definition.baseMagnetRadius,
+                magnetRadius,
                 definition.baseMagnetEasyRemover
             );
 
@@ -320,16 +331,23 @@ function baseCreate(context is Context, definition is map, id is Id) {
                 depth: definition.baseMagnetDepth,
             });
 
-            substractParts(context, id + 'MagnetsHole', basePart.id, [magnets.id]);
+            const magnetsHoleId = id + 'MagnetsHole';
+            substractParts(context, magnetsHoleId, basePart.id, [magnets.id]);
+
+            if (definition.baseMagnetLeadIn) {
+                baseCreateMagnetLeadIn(context, id, basePart, magnetsHoleId, magnetRadius, definition.baseMagnetLeadInSize);
+            }
+
             removeBodies(context, id + 'DeleteMagnetsSketch', [magnetHolesSketch.id]);
         }
     }
 
     // Create the screw holes if needed
     if (definition.screws) {
+        const screwRadius = definition.baseScrewDiameter / 2;
         const enoughSizeForScrews = baseHasEnoughSizeForHoles(
             definition,
-            definition.baseScrewRadius,
+            screwRadius,
             false
         );
 
@@ -339,7 +357,7 @@ function baseCreate(context is Context, definition is map, id is Id) {
                 definition,
                 id + 'Screws',
                 basePart,
-                definition.baseScrewRadius,
+                screwRadius,
                 false
             );
 
@@ -453,6 +471,19 @@ function baseHolesSketch(context is Context, definition is map, id is Id, base i
     skSolve(sketch);
 
     return { 'id': sketchId, 'region': qSketchRegion(sketchId, false) };
+}
+
+
+function baseCreateMagnetLeadIn(context is Context, id is Id, base is map, magnetHoleId is Id, magnetRadius is ValueWithUnits, leadInSize is ValueWithUnits) {
+    const bottomLoop = qLoopEdges(findFace(context, base.id, Orientation.BOTTOM));
+    const magnetHoleEdges = qCreatedBy(magnetHoleId + 'Substract', EntityType.EDGE);
+    const magnetEntryEdges = qIntersection(bottomLoop, magnetHoleEdges);
+
+    opChamfer(context, id + 'MagnetsLeadIn', {
+        'entities' : magnetEntryEdges,
+        'chamferType' : ChamferType.EQUAL_OFFSETS,
+        'width' : min(leadInSize, magnetRadius / 2),
+    });
 }
 
 
